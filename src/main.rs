@@ -10,24 +10,21 @@ pub mod ledger {
     pub mod files {
         use anyhow::{anyhow, Result};
 
-        use nom::{
-            character::complete::{char, one_of},
-            combinator::opt,
-        };
+        use nom::combinator::opt;
 
         use chrono::NaiveDate;
         use nom::character::complete::multispace0;
-        use nom::character::{self, is_digit};
+        use nom::character::{self};
         use nom::error::ParseError;
-        use nom::multi::{count, many0, many1, separated_list0};
-        use nom::sequence::{delimited, terminated};
+        use nom::multi::{many0, many1};
+        use nom::sequence::delimited;
         use nom::{
             branch::alt,
             bytes::complete::{tag, take_while, take_while1},
             character::complete::digit1,
             combinator::map,
             combinator::{map_res, recognize},
-            sequence::{pair, preceded, separated_pair, tuple},
+            sequence::{pair, preceded, separated_pair},
             IResult,
         };
 
