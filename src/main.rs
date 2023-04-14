@@ -46,12 +46,14 @@ pub mod ledger {
             Transaction {
                 date: NaiveDate,
                 payee: String,
+                notes: Vec<String>,
                 postings: Vec<Self>,
                 cleared: bool,
             },
             Posting {
                 account: AccountPath,
                 value: PostingExpression,
+                notes: Option<String>,
             },
         }
 
@@ -138,6 +140,10 @@ pub mod ledger {
             take_while1(move |c: char| !character::is_newline(c as u8))(i)
         }
 
+        fn parse_note(i: &str) -> IResult<&str, &str> {
+            take_while1(move |c: char| !character::is_newline(c as u8))(i)
+        }
+
         fn account_path_string(i: &str) -> IResult<&str, &str> {
             take_while1(move |c| {
                 // TODO This needs tons of work
@@ -163,11 +169,15 @@ pub mod ledger {
                         whitespace1,
                         payee,
                     )),
-                    many1(preceded(whitespace1, parse_posting)),
+                    pair(
+                        many0(preceded(ws(tag(";")), parse_note)),
+                        many1(preceded(whitespace1, parse_posting)),
+                    ),
                 ),
-                |((naive_date, cleared, _, payee), postings)| Node::Transaction {
+                |((naive_date, cleared, _, payee), (notes, postings))| Node::Transaction {
                     date: naive_date,
                     payee: payee.to_string(),
+                    notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
                     postings: postings,
                     cleared: cleared.is_some(),
                 },
@@ -189,10 +199,21 @@ pub mod ledger {
 
         fn parse_posting(i: &str) -> IResult<&str, Node> {
             map(
-                separated_pair(account_path, whitespace1, posting_expression),
-                |(a, v)| Node::Posting {
+                separated_pair(
+                    account_path,
+                    whitespace1,
+                    pair(
+                        posting_expression,
+                        opt(preceded(
+                            tuple((whitespace1, tag(";"))),
+                            preceded(whitespace1, parse_note),
+                        )),
+                    ),
+                ),
+                |(a, (v, n))| Node::Posting {
                     account: a,
                     value: v,
+                    notes: n.map(|f| f.into()),
                 },
             )(i)
         }
@@ -311,15 +332,18 @@ pub mod ledger {
                     vec![Node::Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
                         payee: "withdrawl".into(),
+                        notes: Vec::new(),
                         cleared: false,
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: PostingExpression::Currency((false, 100, 0)),
+                                notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: PostingExpression::Currency((true, 100, 0)),
+                                notes: None,
                             },
                         ]
                     },]
@@ -343,23 +367,28 @@ pub mod ledger {
                     vec![Node::Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
                         payee: "income".into(),
+                        notes: Vec::new(),
                         cleared: false,
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("income".into()),
                                 value: PostingExpression::Currency((true, 100, 0)),
+                                notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: PostingExpression::Currency((false, 100, 0)),
+                                notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
                                 value: PostingExpression::Currency((true, 100, 0)),
+                                notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Virtual("allocations:savings".into()),
                                 value: PostingExpression::Currency((false, 100, 0)),
+                                notes: None,
                             },
                         ]
                     },]
@@ -381,15 +410,85 @@ pub mod ledger {
                     vec![Node::Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
                         payee: "withdrawl with more text".into(),
+                        notes: Vec::new(),
                         cleared: true,
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: PostingExpression::Currency((false, 100, 0)),
+                                notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: PostingExpression::Currency((true, 100, 0)),
+                                notes: None,
+                            },
+                        ]
+                    },]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_transaction_with_note() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+2023/04/09 withdrawl
+    ; hello-world
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+                    )?,
+                    vec![Node::Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                        payee: "withdrawl".into(),
+                        notes: vec!["hello-world".into()],
+                        cleared: false,
+                        postings: vec![
+                            Node::Posting {
+                                account: AccountPath::Real("assets:cash".into()),
+                                value: PostingExpression::Currency((false, 100, 0)),
+                                notes: None,
+                            },
+                            Node::Posting {
+                                account: AccountPath::Real("assets:checking".into()),
+                                value: PostingExpression::Currency((true, 100, 0)),
+                                notes: None,
+                            },
+                        ]
+                    },]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_transaction_with_posting_with_note() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+2023/04/09 withdrawl
+    assets:cash            $100.00 ; hello-world
+    assets:checking       -$100.00
+"
+                    )?,
+                    vec![Node::Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                        payee: "withdrawl".into(),
+                        notes: vec![],
+                        cleared: false,
+                        postings: vec![
+                            Node::Posting {
+                                account: AccountPath::Real("assets:cash".into()),
+                                value: PostingExpression::Currency((false, 100, 0)),
+                                notes: Some("hello-world".into()),
+                            },
+                            Node::Posting {
+                                account: AccountPath::Real("assets:checking".into()),
+                                value: PostingExpression::Currency((true, 100, 0)),
+                                notes: None,
                             },
                         ]
                     },]
