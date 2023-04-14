@@ -1,7 +1,16 @@
+use std::fs;
+
 use anyhow::Result;
 
 fn main() -> Result<()> {
-    let _nodes = ledger::files::parse_str("")?;
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    for arg in args {
+        let data = fs::read_to_string(arg)?;
+        let nodes = ledger::files::parse_str(&data)?;
+        for node in nodes {
+            println!("{:?}", node);
+        }
+    }
 
     Ok(())
 }
@@ -10,21 +19,18 @@ pub mod ledger {
     pub mod files {
         use anyhow::{anyhow, Result};
 
-        use nom::combinator::opt;
-
         use chrono::NaiveDate;
-        use nom::character::complete::{alpha1, multispace0};
-        use nom::character::{self};
-        use nom::error::ParseError;
-        use nom::multi::{many0, many1};
-        use nom::sequence::{delimited, tuple};
         use nom::{
             branch::alt,
-            bytes::complete::{tag, take_while, take_while1},
-            character::complete::digit1,
-            combinator::map,
-            combinator::{map_res, recognize},
-            sequence::{pair, preceded, separated_pair},
+            bytes::complete::{tag, take_while1},
+            character::{
+                self,
+                complete::{alpha1, digit1, multispace0, newline},
+            },
+            combinator::{map, map_res, opt, recognize},
+            error::ParseError,
+            multi::{many0, many1},
+            sequence::{delimited, pair, preceded, separated_pair, tuple},
             IResult,
         };
 
@@ -35,9 +41,15 @@ pub mod ledger {
         }
 
         #[derive(Debug, PartialEq)]
+        pub enum Numeric {
+            Negative(u64, u64),
+            Positive(u64, u64),
+        }
+
+        #[derive(Debug, PartialEq)]
         pub enum PostingExpression {
-            Currency((bool, u64, u64)),
-            Commodity((bool, u64, u64, String)),
+            Literal(Numeric),
+            Commodity((Numeric, String, Option<Numeric>)),
             Factor((bool, u64)),
         }
 
@@ -49,6 +61,7 @@ pub mod ledger {
             Account(AccountPath),
             Price((NaiveDate, String, PostingExpression)),
             Comment(String),
+            Commodity(String),
             Tag(String),
             Transaction {
                 date: NaiveDate,
@@ -89,6 +102,7 @@ pub mod ledger {
                 parse_include,
                 parse_currency,
                 parse_price,
+                parse_commodity,
                 parse_automatic_transaction,
             ))(i)
         }
@@ -99,7 +113,7 @@ pub mod ledger {
                     tuple((preceded(tag("="), whitespace1), payee)), /* Not happy with payee here */
                     pair(
                         many0(preceded(ws(tag(";")), parse_note)),
-                        many1(preceded(whitespace1, parse_posting)),
+                        many1(delimited(whitespace1, parse_posting, newline)),
                     ),
                 ),
                 |((_, path), (notes, postings))| Node::AutomaticTransaction {
@@ -191,40 +205,42 @@ pub mod ledger {
             )(i)
         }
 
-        fn basic_dollars(i: &str) -> IResult<&str, PostingExpression> {
+        fn numeric_literal(i: &str) -> IResult<&str, Numeric> {
             map(
                 separated_pair(
                     opt(tag("-")),
-                    tag("$"),
+                    opt(tag("$")),
                     pair(
                         opt(tag("-")),
-                        separated_pair(unsigned_number, tag("."), unsigned_number),
+                        pair(unsigned_number, opt(preceded(tag("."), unsigned_number))),
                     ),
                 ),
                 |(sign1, (sign2, factors))| {
-                    PostingExpression::Currency((
-                        sign1.is_some() || sign2.is_some(),
-                        factors.0,
-                        factors.1,
-                    ))
+                    if sign1.is_some() || sign2.is_some() {
+                        Numeric::Negative(factors.0, factors.1.map_or(0, |f| f))
+                    } else {
+                        Numeric::Positive(factors.0, factors.1.map_or(0, |f| f))
+                    }
                 },
             )(i)
+        }
+
+        fn linespace1(i: &str) -> IResult<&str, &str> {
+            take_while1(move |c| " \t".contains(c))(i)
         }
 
         fn basic_commodity(i: &str) -> IResult<&str, PostingExpression> {
             map(
                 tuple((
-                    opt(tag("-")),
-                    separated_pair(unsigned_number, tag("."), unsigned_number),
-                    preceded(whitespace1, symbol),
+                    numeric_literal,
+                    preceded(linespace1, symbol),
+                    opt(preceded(
+                        tuple((linespace1, tag("@"), linespace1)),
+                        numeric_literal,
+                    )),
                 )),
-                |(sign, factors, symbol)| {
-                    PostingExpression::Commodity((
-                        sign.is_some(),
-                        factors.0,
-                        factors.1,
-                        symbol.into(),
-                    ))
+                |(quantity, symbol, price)| {
+                    PostingExpression::Commodity((quantity, symbol.into(), price))
                 },
             )(i)
         }
@@ -237,7 +253,11 @@ pub mod ledger {
         }
 
         fn posting_expression(i: &str) -> IResult<&str, PostingExpression> {
-            alt((basic_dollars, basic_commodity, fractional))(i)
+            alt((
+                basic_commodity,
+                map(numeric_literal, |n| PostingExpression::Literal(n)),
+                fractional,
+            ))(i)
         }
 
         fn parse_posting(i: &str) -> IResult<&str, Node> {
@@ -302,12 +322,15 @@ pub mod ledger {
             )(i)
         }
 
-        pub fn whitespace1(i: &str) -> IResult<&str, &str> {
-            take_while1(move |c| " \n\r\t".contains(c))(i)
+        fn parse_commodity(i: &str) -> IResult<&str, Node> {
+            map(
+                separated_pair(tag("commodity"), whitespace1, symbol),
+                |(_, symbol)| Node::Commodity(symbol.into()),
+            )(i)
         }
 
-        pub fn whitespace0(i: &str) -> IResult<&str, &str> {
-            take_while(move |c| " \n\r\t".contains(c))(i)
+        fn whitespace1(i: &str) -> IResult<&str, &str> {
+            take_while1(move |c| " \r\n\t".contains(c))(i)
         }
 
         /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
@@ -352,7 +375,7 @@ pub mod ledger {
                     vec![Node::Price((
                         NaiveDate::from_ymd_opt(2021, 1, 29).expect("inline date error"),
                         "BS".into(),
-                        PostingExpression::Currency((false, 1000, 0))
+                        PostingExpression::Literal(Numeric::Positive(1000, 0))
                     ))]
                 );
 
@@ -411,12 +434,12 @@ pub mod ledger {
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
@@ -449,12 +472,16 @@ pub mod ledger {
                             postings: vec![
                                 Node::Posting {
                                     account: AccountPath::Real("assets:cash".into()),
-                                    value: Some(PostingExpression::Currency((false, 100, 0))),
+                                    value: Some(PostingExpression::Literal(Numeric::Positive(
+                                        100, 0
+                                    ))),
                                     notes: None,
                                 },
                                 Node::Posting {
                                     account: AccountPath::Real("assets:checking".into()),
-                                    value: Some(PostingExpression::Currency((true, 100, 0))),
+                                    value: Some(PostingExpression::Literal(Numeric::Negative(
+                                        100, 0
+                                    ))),
                                     notes: None,
                                 },
                             ]
@@ -467,12 +494,16 @@ pub mod ledger {
                             postings: vec![
                                 Node::Posting {
                                     account: AccountPath::Real("assets:cash".into()),
-                                    value: Some(PostingExpression::Currency((false, 100, 0))),
+                                    value: Some(PostingExpression::Literal(Numeric::Positive(
+                                        100, 0
+                                    ))),
                                     notes: None,
                                 },
                                 Node::Posting {
                                     account: AccountPath::Real("assets:checking".into()),
-                                    value: Some(PostingExpression::Currency((true, 100, 0))),
+                                    value: Some(PostingExpression::Literal(Numeric::Negative(
+                                        100, 0
+                                    ))),
                                     notes: None,
                                 },
                             ]
@@ -503,22 +534,22 @@ pub mod ledger {
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("income".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Virtual("allocations:savings".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                         ]
@@ -546,12 +577,12 @@ pub mod ledger {
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
@@ -579,12 +610,12 @@ pub mod ledger {
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
@@ -612,7 +643,7 @@ pub mod ledger {
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
@@ -650,7 +681,7 @@ pub mod ledger {
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
@@ -679,12 +710,12 @@ pub mod ledger {
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
@@ -712,12 +743,12 @@ pub mod ledger {
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: Some("hello-world".into()),
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:checking".into()),
-                                value: Some(PostingExpression::Currency((true, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
@@ -775,6 +806,16 @@ account [allocations:checking]
             }
 
             #[test]
+            fn test_parse_commodity_declaration() -> Result<()> {
+                assert_eq!(
+                    parse_str(r"commodity VTI")?,
+                    vec![Node::Commodity("VTI".into())]
+                );
+
+                Ok(())
+            }
+
+            #[test]
             fn test_parse_transaction_with_mixed_commodities() -> Result<()> {
                 assert_eq!(
                     parse_str(
@@ -793,16 +834,58 @@ account [allocations:checking]
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Real("assets:cash".into()),
-                                value: Some(PostingExpression::Currency((false, 100, 0))),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                             Node::Posting {
                                 account: AccountPath::Real("assets:fake".into()),
                                 value: Some(PostingExpression::Commodity((
-                                    false,
-                                    100,
-                                    0,
-                                    "BS".into()
+                                    Numeric::Positive(100, 0),
+                                    "BS".into(),
+                                    None,
+                                ))),
+                                notes: None,
+                            },
+                            Node::Posting {
+                                account: AccountPath::Real("equity:opening".into()),
+                                value: None,
+                                notes: None,
+                            },
+                        ]
+                    },]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_transaction_with_priced_commodity() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+2023/04/09 opening
+    assets:cash            $100.00
+    assets:fake             100.00 BS @ $10.00
+    equity:opening
+"
+                    )?,
+                    vec![Node::Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                        payee: "opening".into(),
+                        notes: vec![],
+                        cleared: false,
+                        postings: vec![
+                            Node::Posting {
+                                account: AccountPath::Real("assets:cash".into()),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
+                                notes: None,
+                            },
+                            Node::Posting {
+                                account: AccountPath::Real("assets:fake".into()),
+                                value: Some(PostingExpression::Commodity((
+                                    Numeric::Positive(100, 0),
+                                    "BS".into(),
+                                    Some(Numeric::Positive(10, 0))
                                 ))),
                                 notes: None,
                             },
