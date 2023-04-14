@@ -528,6 +528,20 @@ pub mod ledger {
                     nodes,
                 })
             }
+
+            pub fn iter_transactions(&self) -> impl Iterator<Item = &Transaction> {
+                fn recursively_iter_txs(
+                    nodes: &Vec<Node>,
+                ) -> Box<dyn Iterator<Item = &Transaction> + '_> {
+                    Box::new(nodes.iter().flat_map(|node| match node {
+                        Node::Transaction(tx) => Box::new(std::iter::once(tx)),
+                        Node::Included(children) => recursively_iter_txs(children),
+                        _ => Box::new(std::iter::empty::<&Transaction>()),
+                    }))
+                }
+
+                recursively_iter_txs(&self.nodes)
+            }
         }
 
         fn include_glob(path: &str) -> Result<Vec<Node>> {
