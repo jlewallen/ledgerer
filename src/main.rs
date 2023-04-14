@@ -353,6 +353,63 @@ pub mod ledger {
             }
 
             #[test]
+            fn test_parse_transaction_basic_twice() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+2023/04/09 withdrawl 1
+    assets:cash            $100.00
+    assets:checking       -$100.00
+
+2023/04/10 withdrawl 2
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+                    )?,
+                    vec![
+                        Node::Transaction {
+                            date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                            payee: "withdrawl 1".into(),
+                            notes: Vec::new(),
+                            cleared: false,
+                            postings: vec![
+                                Node::Posting {
+                                    account: AccountPath::Real("assets:cash".into()),
+                                    value: PostingExpression::Currency((false, 100, 0)),
+                                    notes: None,
+                                },
+                                Node::Posting {
+                                    account: AccountPath::Real("assets:checking".into()),
+                                    value: PostingExpression::Currency((true, 100, 0)),
+                                    notes: None,
+                                },
+                            ]
+                        },
+                        Node::Transaction {
+                            date: NaiveDate::from_ymd_opt(2023, 04, 10).unwrap(),
+                            payee: "withdrawl 2".into(),
+                            notes: Vec::new(),
+                            cleared: false,
+                            postings: vec![
+                                Node::Posting {
+                                    account: AccountPath::Real("assets:cash".into()),
+                                    value: PostingExpression::Currency((false, 100, 0)),
+                                    notes: None,
+                                },
+                                Node::Posting {
+                                    account: AccountPath::Real("assets:checking".into()),
+                                    value: PostingExpression::Currency((true, 100, 0)),
+                                    notes: None,
+                                },
+                            ]
+                        },
+                    ]
+                );
+
+                Ok(())
+            }
+
+            #[test]
             fn test_parse_transaction_basic_with_virtual() -> Result<()> {
                 assert_eq!(
                     parse_str(
