@@ -45,6 +45,8 @@ pub mod ledger {
             Currency(String),
             Include(String),
             Account(AccountPath),
+            Comment(String),
+            Tag(String),
             Transaction {
                 date: NaiveDate,
                 payee: String,
@@ -58,55 +60,6 @@ pub mod ledger {
                 notes: Option<String>,
             },
         }
-
-        /*
-        pub fn word(i: &str) -> IResult<&str, &str> {
-            take_while1(move |c| "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(c))(
-                i,
-            )
-        }
-
-        pub fn spaces(i: &str) -> IResult<&str, &str> {
-            take_while1(move |c| " \t".contains(c))(i)
-        }
-
-        pub fn noun(i: &str) -> IResult<&str, Item> {
-            map(word, |s: &str| Item::Named(s.to_owned()))(i)
-        }
-
-        pub fn string_literal(i: &str) -> IResult<&str, &str> {
-            delimited(tag("\""), string_inside, tag("\""))(i)
-        }
-
-        fn string_inside(i: &str) -> IResult<&str, &str> {
-            take_while(|c: char| c.is_alphabetic() || c.is_whitespace())(i)
-        }
-
-        pub fn unsigned_number(i: &str) -> IResult<&str, u64> {
-            map_res(recognize(digit1), str::parse)(i)
-        }
-
-        pub fn gid_reference(i: &str) -> IResult<&str, Item> {
-            map(preceded(tag("#"), unsigned_number), |n| {
-                Item::Gid(EntityGid::new(n))
-            })(i)
-        }
-
-        pub fn surrounding_area(i: &str) -> IResult<&str, Item> {
-            map(tag("area"), |_s: &str| Item::Area)(i)
-        }
-
-        pub fn noun_or_specific(i: &str) -> IResult<&str, Item> {
-            alt((surrounding_area, noun, gid_reference))(i)
-        }
-
-        pub fn named_place(i: &str) -> IResult<&str, Item> {
-            alt((
-                gid_reference,
-                map(word, |s: &str| Item::Route(s.to_owned())),
-            ))(i)
-        }
-        */
 
         pub fn unsigned_number(i: &str) -> IResult<&str, u64> {
             map_res(recognize(digit1), str::parse)(i)
@@ -122,7 +75,9 @@ pub mod ledger {
         fn parse_directive(i: &str) -> IResult<&str, Node> {
             alt((
                 parse_transaction,
+                parse_comment,
                 parse_account,
+                parse_tag,
                 parse_include,
                 parse_currency,
             ))(i)
@@ -144,6 +99,10 @@ pub mod ledger {
         }
 
         fn payee(i: &str) -> IResult<&str, &str> {
+            take_while1(move |c: char| !character::is_newline(c as u8))(i)
+        }
+
+        fn parse_rest_of_comment(i: &str) -> IResult<&str, &str> {
             take_while1(move |c: char| !character::is_newline(c as u8))(i)
         }
 
@@ -253,6 +212,20 @@ pub mod ledger {
             )(i)
         }
 
+        fn parse_comment(i: &str) -> IResult<&str, Node> {
+            map(
+                separated_pair(tag(";"), whitespace1, parse_rest_of_comment),
+                |(_, comment)| Node::Comment(comment.into()),
+            )(i)
+        }
+
+        fn parse_tag(i: &str) -> IResult<&str, Node> {
+            map(
+                separated_pair(tag("tag"), whitespace1, path),
+                |(_, path)| Node::Tag(path.into()),
+            )(i)
+        }
+
         pub fn whitespace1(i: &str) -> IResult<&str, &str> {
             take_while1(move |c| " \n\r\t".contains(c))(i)
         }
@@ -274,42 +247,8 @@ pub mod ledger {
 
         pub fn parse_str(i: &str) -> Result<Vec<Node>> {
             let (_, nodes) = many0(ws(parse_directive))(i).map_err(|e| anyhow!("{:?}", e))?;
-            /*
-            let (_, nodes) = many0(map(
-                alt((parse_directive, map(whitespace1, |_| Node::Whitespace))),
-                |n| n,
-            ))(i)
-            .map_err(|e| anyhow!("{:?}", e))?;
-            */
-            /*
-            terminated(separated_list0(whitespace1, parse_directive), whitespace0)(i)
-                .map_err(|e| anyhow!("{:?}", e))?;
-            */
 
             Ok(nodes)
-            /*
-            let item = map(separated_pair(tag("put"), spaces, noun), |(_, target)| {
-                target
-            });
-
-            let (_, action) = map(
-                separated_pair(
-                    separated_pair(
-                        item,
-                        spaces,
-                        pair(tag("inside"), opt(pair(spaces, tag("of")))),
-                    ),
-                    spaces,
-                    noun,
-                ),
-                |(item, target)| PutInsideAction {
-                    item: item.0,
-                    vessel: target,
-                },
-            )(i)?;
-            */
-
-            // Ok(vec![])
         }
 
         #[cfg(test)]
@@ -625,6 +564,13 @@ account [allocations:checking]
                     parse_str(r"account [expenses:cash]")?,
                     vec![Node::Account(AccountPath::Virtual("expenses:cash".into()),)]
                 );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_tag_declaration() -> Result<()> {
+                assert_eq!(parse_str(r"tag income")?, vec![Node::Tag("income".into())]);
 
                 Ok(())
             }
