@@ -54,6 +54,29 @@ pub mod ledger {
         }
 
         #[derive(Debug, PartialEq)]
+        pub struct Transaction {
+            date: NaiveDate,
+            payee: String,
+            notes: Vec<String>,
+            postings: Vec<Posting>,
+            cleared: bool,
+        }
+
+        #[derive(Debug, PartialEq)]
+        pub struct Posting {
+            account: AccountPath,
+            value: Option<PostingExpression>,
+            notes: Option<String>,
+        }
+
+        #[derive(Debug, PartialEq)]
+        pub struct AutomaticTransaction {
+            path: String,
+            notes: Vec<String>,
+            postings: Vec<Posting>,
+        }
+
+        #[derive(Debug, PartialEq)]
         pub enum Node {
             Whitespace,
             Currency(String),
@@ -63,23 +86,9 @@ pub mod ledger {
             Comment(String),
             Commodity(String),
             Tag(String),
-            Transaction {
-                date: NaiveDate,
-                payee: String,
-                notes: Vec<String>,
-                postings: Vec<Self>,
-                cleared: bool,
-            },
-            Posting {
-                account: AccountPath,
-                value: Option<PostingExpression>,
-                notes: Option<String>,
-            },
-            AutomaticTransaction {
-                path: String,
-                notes: Vec<String>,
-                postings: Vec<Self>,
-            },
+            Transaction(Transaction),
+            Posting(Posting),
+            AutomaticTransaction(AutomaticTransaction),
         }
 
         fn unsigned_number(i: &str) -> IResult<&str, u64> {
@@ -109,10 +118,12 @@ pub mod ledger {
                         )),
                     ),
                 ),
-                |((_, path), (notes, postings))| Node::AutomaticTransaction {
-                    path: path.into(),
-                    notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
-                    postings: postings,
+                |((_, path), (notes, postings))| {
+                    Node::AutomaticTransaction(AutomaticTransaction {
+                        path: path.into(),
+                        notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+                        postings,
+                    })
                 },
             )(i)
         }
@@ -192,12 +203,14 @@ pub mod ledger {
                         )),
                     ),
                 ),
-                |((naive_date, cleared, _, payee), (notes, postings))| Node::Transaction {
-                    date: naive_date,
-                    payee: payee.to_string(),
-                    notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
-                    postings: postings,
-                    cleared: cleared.is_some(),
+                |((naive_date, cleared, _, payee), (notes, postings))| {
+                    Node::Transaction(Transaction {
+                        date: naive_date,
+                        payee: payee.to_string(),
+                        notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+                        postings,
+                        cleared: cleared.is_some(),
+                    })
                 },
             )(i)
         }
@@ -252,12 +265,12 @@ pub mod ledger {
         fn posting_expression(i: &str) -> IResult<&str, PostingExpression> {
             alt((
                 basic_commodity,
-                map(numeric_literal, |n| PostingExpression::Literal(n)),
+                map(numeric_literal, PostingExpression::Literal),
                 fractional,
             ))(i)
         }
 
-        fn parse_posting(i: &str) -> IResult<&str, Node> {
+        fn parse_posting(i: &str) -> IResult<&str, Posting> {
             map(
                 pair(
                     account_path,
@@ -269,7 +282,7 @@ pub mod ledger {
                         )),
                     ),
                 ),
-                |(a, (v, n))| Node::Posting {
+                |(a, (v, n))| Posting {
                     account: a,
                     value: v,
                     notes: n.map(|f| f.into()),
@@ -301,7 +314,7 @@ pub mod ledger {
         fn parse_account(i: &str) -> IResult<&str, Node> {
             map(
                 separated_pair(tag("account"), linespace1, account_path),
-                |(_, path)| Node::Account(path.into()),
+                |(_, path)| Node::Account(path),
             )(i)
         }
 
@@ -435,24 +448,24 @@ pub mod ledger {
     assets:checking       -$100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
                         notes: Vec::new(),
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    })]
                 );
 
                 Ok(())
@@ -473,20 +486,20 @@ pub mod ledger {
 "
                     )?,
                     vec![
-                        Node::Transaction {
-                            date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                        Node::Transaction(Transaction {
+                            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                             payee: "withdrawl 1".into(),
                             notes: Vec::new(),
                             cleared: false,
                             postings: vec![
-                                Node::Posting {
+                                Posting {
                                     account: AccountPath::Real("assets:cash".into()),
                                     value: Some(PostingExpression::Literal(Numeric::Positive(
                                         100, 0
                                     ))),
                                     notes: None,
                                 },
-                                Node::Posting {
+                                Posting {
                                     account: AccountPath::Real("assets:checking".into()),
                                     value: Some(PostingExpression::Literal(Numeric::Negative(
                                         100, 0
@@ -494,21 +507,21 @@ pub mod ledger {
                                     notes: None,
                                 },
                             ]
-                        },
-                        Node::Transaction {
-                            date: NaiveDate::from_ymd_opt(2023, 04, 10).unwrap(),
+                        }),
+                        Node::Transaction(Transaction {
+                            date: NaiveDate::from_ymd_opt(2023, 4, 10).unwrap(),
                             payee: "withdrawl 2".into(),
                             notes: Vec::new(),
                             cleared: false,
                             postings: vec![
-                                Node::Posting {
+                                Posting {
                                     account: AccountPath::Real("assets:cash".into()),
                                     value: Some(PostingExpression::Literal(Numeric::Positive(
                                         100, 0
                                     ))),
                                     notes: None,
                                 },
-                                Node::Posting {
+                                Posting {
                                     account: AccountPath::Real("assets:checking".into()),
                                     value: Some(PostingExpression::Literal(Numeric::Negative(
                                         100, 0
@@ -516,7 +529,7 @@ pub mod ledger {
                                     notes: None,
                                 },
                             ]
-                        },
+                        }),
                     ]
                 );
 
@@ -533,24 +546,24 @@ pub mod ledger {
     assets:checking              $100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "income".into(),
                         notes: Vec::new(),
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("income".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    })]
                 );
 
                 Ok(())
@@ -568,34 +581,34 @@ pub mod ledger {
     [allocations:savings]        $100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "income".into(),
                         notes: Vec::new(),
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("income".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Virtual("allocations:savings".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -611,24 +624,24 @@ pub mod ledger {
     assets:checking       $-100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "another example".into(),
                         notes: Vec::new(),
                         cleared: true,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -644,24 +657,24 @@ pub mod ledger {
     assets:checking       -$100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl with more text".into(),
                         notes: Vec::new(),
                         cleared: true,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -677,24 +690,24 @@ pub mod ledger {
     assets:cash
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
                         notes: Vec::new(),
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: None,
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -710,24 +723,24 @@ pub mod ledger {
     assets:checking       -$100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
                         notes: Vec::new(),
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: None,
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -744,24 +757,24 @@ pub mod ledger {
     assets:checking       -$100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
                         notes: vec!["hello-world".into()],
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -777,24 +790,24 @@ pub mod ledger {
     assets:checking       -$100.00
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
                         notes: vec![],
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: Some("hello-world".into()),
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -868,18 +881,18 @@ account [allocations:checking]
     equity:opening
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "opening".into(),
                         notes: vec![],
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:fake".into()),
                                 value: Some(PostingExpression::Commodity((
                                     Numeric::Positive(100, 0),
@@ -888,13 +901,13 @@ account [allocations:checking]
                                 ))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("equity:opening".into()),
                                 value: None,
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -911,18 +924,18 @@ account [allocations:checking]
     equity:opening
 "
                     )?,
-                    vec![Node::Transaction {
-                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "opening".into(),
                         notes: vec![],
                         cleared: false,
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("assets:fake".into()),
                                 value: Some(PostingExpression::Commodity((
                                     Numeric::Positive(100, 0),
@@ -931,13 +944,13 @@ account [allocations:checking]
                                 ))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Real("equity:opening".into()),
                                 value: None,
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -953,24 +966,24 @@ account [allocations:checking]
     [assets:checking:reserved]                           (1)
 "
                     )?,
-                    vec![Node::AutomaticTransaction {
+                    vec![Node::AutomaticTransaction(AutomaticTransaction {
                         path: "assets:savings:ktc".into(),
                         notes: vec![],
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Virtual(
                                     "allocations:checking:savings:main".into()
                                 ),
                                 value: Some(PostingExpression::Factor((true, 1))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
                                 value: Some(PostingExpression::Factor((false, 1))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
@@ -987,24 +1000,24 @@ account [allocations:checking]
     [assets:checking:reserved]                           (1)
 "
                     )?,
-                    vec![Node::AutomaticTransaction {
+                    vec![Node::AutomaticTransaction(AutomaticTransaction {
                         path: "assets:savings:ktc".into(),
                         notes: vec![":automatic:".into()],
                         postings: vec![
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Virtual(
                                     "allocations:checking:savings:main".into()
                                 ),
                                 value: Some(PostingExpression::Factor((true, 1))),
                                 notes: None,
                             },
-                            Node::Posting {
+                            Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
                                 value: Some(PostingExpression::Factor((false, 1))),
                                 notes: None,
                             },
                         ]
-                    },]
+                    }),]
                 );
 
                 Ok(())
