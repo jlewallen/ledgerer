@@ -32,6 +32,7 @@ pub mod ledger {
 
         use anyhow::{anyhow, Result};
 
+        use bigdecimal::{BigDecimal, Zero};
         use chrono::NaiveDate;
         use nom::{
             branch::alt,
@@ -60,42 +61,116 @@ pub mod ledger {
             Negative(u64, u64),
             Positive(u64, u64),
         }
+        impl Numeric {
+            pub fn to_decimal(&self) -> BigDecimal {
+                match self {
+                    Numeric::Negative(a, b) => BigDecimal::from(-(*a as i64 * 100 + *b as i64)),
+                    Numeric::Positive(a, b) => BigDecimal::from(*a as i64 * 100 + *b as i64),
+                }
+            }
+        }
+
+        impl Into<BigDecimal> for Numeric {
+            fn into(self) -> BigDecimal {
+                match self {
+                    Numeric::Negative(a, b) => BigDecimal::from(-(a as i64 * 100 + b as i64)),
+                    Numeric::Positive(a, b) => BigDecimal::from(a as i64 * 100 + b as i64),
+                }
+            }
+        }
 
         #[derive(Debug, PartialEq)]
         pub enum Expression {
             Literal(Numeric),
             Commodity((Numeric, String, Option<Numeric>)),
             Factor((bool, u64)),
+            Calculated(BigDecimal),
         }
 
         #[derive(Debug, PartialEq)]
         pub struct Transaction {
-            date: NaiveDate,
-            payee: String,
-            notes: Vec<String>,
-            postings: Vec<Posting>,
-            cleared: bool,
+            pub date: NaiveDate,
+            pub payee: String,
+            pub cleared: bool,
+            pub notes: Vec<String>,
+            pub postings: Vec<Posting>,
+        }
+
+        impl Transaction {
+            fn balanced(self) -> Result<Self> {
+                if self.postings.iter().any(|p| p.expression.is_none()) {
+                    let total: BigDecimal = self
+                        .postings
+                        .iter()
+                        .map(|p| p.has_value().or(Some(BigDecimal::zero())).unwrap())
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .sum();
+
+                    let mut postings = self.postings;
+
+                    for mut posting in postings.iter_mut() {
+                        if posting.expression.is_none() {
+                            posting.expression = Some(Expression::Calculated(-total.clone()))
+                        }
+                    }
+
+                    Ok(Transaction {
+                        date: self.date,
+                        payee: self.payee,
+                        cleared: self.cleared,
+                        notes: self.notes,
+                        postings,
+                    })
+                } else {
+                    Ok(self)
+                }
+            }
         }
 
         #[derive(Debug, PartialEq)]
         pub struct Posting {
-            account: AccountPath,
-            expression: Option<Expression>,
-            notes: Option<String>,
+            pub account: AccountPath,
+            pub expression: Option<Expression>,
+            pub notes: Option<String>,
+        }
+
+        impl Posting {
+            pub fn has_expression(&self) -> bool {
+                match &self.expression {
+                    None => false,
+                    _ => true,
+                }
+            }
+
+            pub fn has_literal(&self) -> Option<&Numeric> {
+                match &self.expression {
+                    Some(Expression::Literal(numeric)) => Some(numeric),
+                    _ => None,
+                }
+            }
+
+            pub fn has_value(&self) -> Option<BigDecimal> {
+                match &self.expression {
+                    Some(Expression::Literal(numeric)) => Some(numeric.to_decimal()),
+                    Some(Expression::Calculated(value)) => Some(value.clone()),
+                    _ => None,
+                }
+            }
         }
 
         #[derive(Debug, PartialEq)]
         pub struct AutomaticTransaction {
-            condition: String,
-            notes: Vec<String>,
-            postings: Vec<Posting>,
+            pub condition: String,
+            pub notes: Vec<String>,
+            pub postings: Vec<Posting>,
         }
 
         #[derive(Debug, PartialEq)]
         pub struct CommodityPrice {
-            date: NaiveDate,
-            symbol: String,
-            expression: Expression,
+            pub date: NaiveDate,
+            pub symbol: String,
+            pub expression: Expression,
         }
 
         #[derive(Debug, PartialEq)]
@@ -437,11 +512,12 @@ pub mod ledger {
                     .nodes
                     .into_iter()
                     .map(|node| match node {
+                        Node::Transaction(tx) => Ok(Node::Transaction(tx.balanced()?)),
                         Node::Include(include_path_or_glob) => Ok(Node::Included(include_glob(
                             &relative
                                 .join(include_path_or_glob)
                                 .to_str()
-                                .ok_or(anyhow!("Expected friendlier path"))?,
+                                .ok_or(anyhow!("Unfriendly path"))?,
                         )?)),
                         _ => Ok(node),
                     })
