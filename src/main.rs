@@ -42,7 +42,9 @@ pub mod ledger {
         #[derive(Debug, PartialEq)]
         pub enum Node {
             Whitespace,
+            Currency(String),
             Include(String),
+            Account(AccountPath),
             Transaction {
                 date: NaiveDate,
                 payee: String,
@@ -118,7 +120,12 @@ pub mod ledger {
         }
 
         fn parse_directive(i: &str) -> IResult<&str, Node> {
-            alt((parse_transaction, parse_include))(i)
+            alt((
+                parse_transaction,
+                parse_account,
+                parse_include,
+                parse_currency,
+            ))(i)
         }
 
         fn date_string(i: &str) -> IResult<&str, NaiveDate> {
@@ -218,10 +225,31 @@ pub mod ledger {
             )(i)
         }
 
+        fn parse_currency(i: &str) -> IResult<&str, Node> {
+            map(
+                separated_pair(
+                    tag("D"),
+                    whitespace1,
+                    pair(
+                        tag("$"),
+                        separated_pair(unsigned_number, tag("."), unsigned_number),
+                    ),
+                ),
+                |(_, _)| Node::Currency("$".into()),
+            )(i)
+        }
+
         fn parse_include(i: &str) -> IResult<&str, Node> {
             map(
                 separated_pair(tag("!include"), whitespace1, path),
                 |(_, path)| Node::Include(path.into()),
+            )(i)
+        }
+
+        fn parse_account(i: &str) -> IResult<&str, Node> {
+            map(
+                separated_pair(tag("account"), whitespace1, account_path),
+                |(_, path)| Node::Account(path.into()),
             )(i)
         }
 
@@ -291,6 +319,13 @@ pub mod ledger {
             #[test]
             fn test_parse_empty() -> Result<()> {
                 assert_eq!(parse_str(r"")?, vec![]);
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_standard_currency() -> Result<()> {
+                assert_eq!(parse_str(r"D $1000.00")?, vec![Node::Currency("$".into())]);
 
                 Ok(())
             }
@@ -549,6 +584,46 @@ pub mod ledger {
                             },
                         ]
                     },]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_account_declaration() -> Result<()> {
+                assert_eq!(
+                    parse_str(r"account expenses:cash")?,
+                    vec![Node::Account(AccountPath::Real("expenses:cash".into()),)]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_account_declaration_multiple() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+account expenses:cash
+account expenses:food
+account [allocations:checking]
+"
+                    )?,
+                    vec![
+                        Node::Account(AccountPath::Real("expenses:cash".into())),
+                        Node::Account(AccountPath::Real("expenses:food".into())),
+                        Node::Account(AccountPath::Virtual("allocations:checking".into())),
+                    ]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_virtual_account_declaration() -> Result<()> {
+                assert_eq!(
+                    parse_str(r"account [expenses:cash]")?,
+                    vec![Node::Account(AccountPath::Virtual("expenses:cash".into()),)]
                 );
 
                 Ok(())
