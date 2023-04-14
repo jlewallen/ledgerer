@@ -17,7 +17,7 @@ pub mod ledger {
         use nom::character::{self};
         use nom::error::ParseError;
         use nom::multi::{many0, many1};
-        use nom::sequence::delimited;
+        use nom::sequence::{delimited, tuple};
         use nom::{
             branch::alt,
             bytes::complete::{tag, take_while, take_while1},
@@ -157,17 +157,19 @@ pub mod ledger {
         fn parse_transaction(i: &str) -> IResult<&str, Node> {
             map(
                 pair(
-                    separated_pair(date_string, whitespace1, payee),
+                    tuple((
+                        date_string,
+                        opt(preceded(whitespace1, tag("*"))),
+                        whitespace1,
+                        payee,
+                    )),
                     many1(preceded(whitespace1, parse_posting)),
                 ),
-                |((naive_date, payee), postings)| {
-                    println!("{:?} {:?} {:?}", naive_date, payee, postings);
-                    Node::Transaction {
-                        date: naive_date,
-                        payee: payee.to_string(),
-                        postings: postings,
-                        cleared: false,
-                    }
+                |((naive_date, cleared, _, payee), postings)| Node::Transaction {
+                    date: naive_date,
+                    payee: payee.to_string(),
+                    postings: postings,
+                    cleared: cleared.is_some(),
                 },
             )(i)
         }
@@ -358,6 +360,36 @@ pub mod ledger {
                             Node::Posting {
                                 account: AccountPath::Virtual("allocations:savings".into()),
                                 value: PostingExpression::Currency((false, 100, 0)),
+                            },
+                        ]
+                    },]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_transaction_basic_cleared() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+2023/04/09 * withdrawl with more text
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+                    )?,
+                    vec![Node::Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                        payee: "withdrawl with more text".into(),
+                        cleared: true,
+                        postings: vec![
+                            Node::Posting {
+                                account: AccountPath::Real("assets:cash".into()),
+                                value: PostingExpression::Currency((false, 100, 0)),
+                            },
+                            Node::Posting {
+                                account: AccountPath::Real("assets:checking".into()),
+                                value: PostingExpression::Currency((true, 100, 0)),
                             },
                         ]
                     },]
