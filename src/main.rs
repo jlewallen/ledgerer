@@ -1,8 +1,17 @@
-use std::path::Path;
-
 use anyhow::Result;
+use std::path::Path;
+use tracing_subscriber::prelude::*;
 
 fn main() -> Result<()> {
+    fn get_rust_log() -> String {
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into())
+    }
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(get_rust_log()))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let args: Vec<_> = std::env::args().skip(1).collect();
     for arg in args {
         let file = ledger::parsing::LedgerFile::parse(&Path::new(&arg))?;
@@ -37,6 +46,8 @@ pub mod ledger {
             sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
             IResult,
         };
+
+        use tracing::*;
 
         #[derive(Debug, PartialEq)]
         pub enum AccountPath {
@@ -403,7 +414,7 @@ pub mod ledger {
 
         impl LedgerFile {
             pub fn parse(path: &Path) -> Result<Self> {
-                println!("parsing {:?}", path);
+                info!("parsing {:?}", path);
 
                 let data = fs::read_to_string(path)?;
                 let nodes = parse_str(&data)?;
@@ -415,7 +426,7 @@ pub mod ledger {
             }
 
             pub fn preprocess(self) -> Result<LedgerFile> {
-                println!("preprocessing {:?}", self.path);
+                debug!("preprocessing {:?}", self.path);
 
                 let relative = self
                     .path
