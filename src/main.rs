@@ -1,5 +1,8 @@
 use anyhow::Result;
-use std::path::Path;
+use bigdecimal::{BigDecimal, Zero};
+use std::{path::Path, time::Instant};
+#[allow(unused_imports)]
+use tracing::*;
 use tracing_subscriber::prelude::*;
 
 fn main() -> Result<()> {
@@ -14,10 +17,40 @@ fn main() -> Result<()> {
 
     let args: Vec<_> = std::env::args().skip(1).collect();
     for arg in args {
-        let file = ledger::parsing::LedgerFile::parse(&Path::new(&arg))?;
-        let processed = file.preprocess()?;
+        let processed = {
+            let _span = span!(Level::INFO, "loading").entered();
+            let started = Instant::now();
+            let file = ledger::parsing::LedgerFile::parse(&Path::new(&arg))?;
+            let loaded = file.preprocess()?;
+            let elapsed = Instant::now() - started;
+            info!("loaded ledger in {:?}ms", elapsed);
+            loaded
+        };
 
-        _ = processed
+        let mut total = bigdecimal::BigDecimal::zero();
+        for tx in processed.iter_transactions() {
+            for posting in tx.postings.iter() {
+                total += match &posting.account {
+                    ledger::parsing::AccountPath::Real(name) => {
+                        if name == "assets:checking" {
+                            let value = posting.has_value();
+                            // println!("{:?} {} {} {:?}", tx.date, name, tx.payee, value);
+                            match value {
+                                Some(value) => value,
+                                _ => BigDecimal::zero(),
+                            }
+                        } else {
+                            BigDecimal::zero()
+                        }
+                    }
+                    _ => BigDecimal::zero(),
+                }
+            }
+        }
+
+        let sorted: Vec<_> = processed.iter_transactions_in_temporal_order().collect();
+
+        println!("{}", serde_json::to_string(&sorted)?);
     }
 
     Ok(())
@@ -48,6 +81,7 @@ pub mod ledger {
             IResult,
         };
 
+        use serde::{ser::SerializeStruct, Serialize};
         use tracing::*;
 
         #[derive(Debug, PartialEq)]
@@ -56,25 +90,29 @@ pub mod ledger {
             Virtual(String),
         }
 
+        impl AccountPath {
+            pub fn as_str(&self) -> &str {
+                match self {
+                    AccountPath::Real(p) | AccountPath::Virtual(p) => p,
+                }
+            }
+        }
+
         #[derive(Debug, PartialEq)]
         pub enum Numeric {
             Negative(u64, u64),
             Positive(u64, u64),
         }
+
         impl Numeric {
             pub fn to_decimal(&self) -> BigDecimal {
                 match self {
-                    Numeric::Negative(a, b) => BigDecimal::from(-(*a as i64 * 100 + *b as i64)),
-                    Numeric::Positive(a, b) => BigDecimal::from(*a as i64 * 100 + *b as i64),
-                }
-            }
-        }
-
-        impl Into<BigDecimal> for Numeric {
-            fn into(self) -> BigDecimal {
-                match self {
-                    Numeric::Negative(a, b) => BigDecimal::from(-(a as i64 * 100 + b as i64)),
-                    Numeric::Positive(a, b) => BigDecimal::from(a as i64 * 100 + b as i64),
+                    Numeric::Negative(a, b) => {
+                        BigDecimal::new((-(*a as i64 * 100 + *b as i64)).into(), 2)
+                    }
+                    Numeric::Positive(a, b) => {
+                        BigDecimal::new((*a as i64 * 100 + *b as i64).into(), 2)
+                    }
                 }
             }
         }
@@ -94,6 +132,21 @@ pub mod ledger {
             pub cleared: bool,
             pub notes: Vec<String>,
             pub postings: Vec<Posting>,
+        }
+
+        impl Serialize for Transaction {
+            fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                let mut state = serializer.serialize_struct("Transaction", 3)?;
+                state.serialize_field("date", &format!("{:?}", &self.date))?;
+                state.serialize_field("payee", &self.payee)?;
+                state.serialize_field("cleared", &self.cleared)?;
+                state.serialize_field("notes", &self.notes)?;
+                state.serialize_field("postings", &self.postings)?;
+                state.end()
+            }
         }
 
         impl Transaction {
@@ -132,7 +185,7 @@ pub mod ledger {
         pub struct Posting {
             pub account: AccountPath,
             pub expression: Option<Expression>,
-            pub notes: Option<String>,
+            pub note: Option<String>,
         }
 
         impl Posting {
@@ -156,6 +209,23 @@ pub mod ledger {
                     Some(Expression::Calculated(value)) => Some(value.clone()),
                     _ => None,
                 }
+            }
+        }
+
+        impl Serialize for Posting {
+            fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                let value = match self.has_value() {
+                    Some(value) => Some(format!("{}", value)),
+                    None => None,
+                };
+                let mut state = serializer.serialize_struct("Posting", 3)?;
+                state.serialize_field("account", self.account.as_str())?;
+                state.serialize_field("value", &value)?;
+                state.serialize_field("note", &self.note)?;
+                state.end()
             }
         }
 
@@ -370,10 +440,10 @@ pub mod ledger {
                         )),
                     ),
                 ),
-                |(account, (expression, notes))| Posting {
+                |(account, (expression, note))| Posting {
                     account,
                     expression,
-                    notes: notes.map(|f| f.into()),
+                    note: note.map(|f| f.into()),
                 },
             )(i)
         }
@@ -529,6 +599,14 @@ pub mod ledger {
                 })
             }
 
+            pub fn iter_transactions_in_temporal_order(
+                &self,
+            ) -> impl Iterator<Item = &Transaction> {
+                let mut everything: Vec<&Transaction> = self.iter_transactions().collect();
+                everything.sort_by(|a, b| a.date.cmp(&b.date));
+                everything.into_iter()
+            }
+
             pub fn iter_transactions(&self) -> impl Iterator<Item = &Transaction> {
                 fn recursively_iter_txs(
                     nodes: &Vec<Node>,
@@ -647,12 +725,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     })]
@@ -687,14 +765,14 @@ pub mod ledger {
                                     expression: Some(Expression::Literal(Numeric::Positive(
                                         100, 0
                                     ))),
-                                    notes: None,
+                                    note: None,
                                 },
                                 Posting {
                                     account: AccountPath::Real("assets:checking".into()),
                                     expression: Some(Expression::Literal(Numeric::Negative(
                                         100, 0
                                     ))),
-                                    notes: None,
+                                    note: None,
                                 },
                             ]
                         }),
@@ -709,14 +787,14 @@ pub mod ledger {
                                     expression: Some(Expression::Literal(Numeric::Positive(
                                         100, 0
                                     ))),
-                                    notes: None,
+                                    note: None,
                                 },
                                 Posting {
                                     account: AccountPath::Real("assets:checking".into()),
                                     expression: Some(Expression::Literal(Numeric::Negative(
                                         100, 0
                                     ))),
-                                    notes: None,
+                                    note: None,
                                 },
                             ]
                         }),
@@ -745,12 +823,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("income".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     })]
@@ -780,22 +858,22 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("income".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Virtual("allocations:savings".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -823,12 +901,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -856,12 +934,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -889,12 +967,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: None,
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -922,12 +1000,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: None,
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -956,12 +1034,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -989,12 +1067,12 @@ pub mod ledger {
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: Some("hello-world".into()),
+                                note: Some("hello-world".into()),
                             },
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
                                 expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -1089,7 +1167,7 @@ account [allocations:checking]
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:fake".into()),
@@ -1098,12 +1176,12 @@ account [allocations:checking]
                                     "BS".into(),
                                     None,
                                 ))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("equity:opening".into()),
                                 expression: None,
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -1132,7 +1210,7 @@ account [allocations:checking]
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
                                 expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("assets:fake".into()),
@@ -1141,12 +1219,12 @@ account [allocations:checking]
                                     "BS".into(),
                                     Some(Numeric::Positive(10, 0))
                                 ))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Real("equity:opening".into()),
                                 expression: None,
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -1174,12 +1252,12 @@ account [allocations:checking]
                                     "allocations:checking:savings:main".into()
                                 ),
                                 expression: Some(Expression::Factor((true, 1))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
                                 expression: Some(Expression::Factor((false, 1))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
@@ -1208,12 +1286,12 @@ account [allocations:checking]
                                     "allocations:checking:savings:main".into()
                                 ),
                                 expression: Some(Expression::Factor((true, 1))),
-                                notes: None,
+                                note: None,
                             },
                             Posting {
                                 account: AccountPath::Virtual("assets:checking:reserved".into()),
                                 expression: Some(Expression::Factor((false, 1))),
-                                notes: None,
+                                note: None,
                             },
                         ]
                     }),]
