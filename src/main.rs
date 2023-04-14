@@ -138,14 +138,20 @@ pub mod ledger {
             take_while1(move |c: char| !character::is_newline(c as u8))(i)
         }
 
+        fn account_path_string(i: &str) -> IResult<&str, &str> {
+            take_while1(move |c| {
+                // TODO This needs tons of work
+                ":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-".contains(c)
+            })(i)
+        }
+
         fn account_path(i: &str) -> IResult<&str, AccountPath> {
-            map(
-                take_while1(move |c| {
-                    // TODO This needs tons of work
-                    ":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-".contains(c)
+            alt((
+                map(delimited(tag("["), account_path_string, tag("]")), |p| {
+                    AccountPath::Virtual(p.into())
                 }),
-                |v: &str| AccountPath::Real(v.into()),
-            )(i)
+                map(account_path_string, |p| AccountPath::Real(p.into())),
+            ))(i)
         }
 
         fn parse_transaction(i: &str) -> IResult<&str, Node> {
@@ -296,8 +302,8 @@ pub mod ledger {
                     parse_str(
                         r"
 2023/04/09 withdrawl
-    assets::cash            $100.00
-    assets::checking       -$100.00
+    assets:cash            $100.00
+    assets:checking       -$100.00
 "
                     )?,
                     vec![Node::Transaction {
@@ -306,12 +312,52 @@ pub mod ledger {
                         cleared: false,
                         postings: vec![
                             Node::Posting {
-                                account: AccountPath::Real("assets::cash".into()),
+                                account: AccountPath::Real("assets:cash".into()),
                                 value: PostingExpression::Currency((false, 100, 0)),
                             },
                             Node::Posting {
-                                account: AccountPath::Real("assets::checking".into()),
+                                account: AccountPath::Real("assets:checking".into()),
                                 value: PostingExpression::Currency((true, 100, 0)),
+                            },
+                        ]
+                    },]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_transaction_basic_with_virtual() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+2023/04/09 income
+    income                      -$100.00
+    assets:checking              $100.00
+    [assets:checking:reserved]  -$100.00
+    [allocations:savings]        $100.00
+"
+                    )?,
+                    vec![Node::Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                        payee: "income".into(),
+                        cleared: false,
+                        postings: vec![
+                            Node::Posting {
+                                account: AccountPath::Real("income".into()),
+                                value: PostingExpression::Currency((true, 100, 0)),
+                            },
+                            Node::Posting {
+                                account: AccountPath::Real("assets:checking".into()),
+                                value: PostingExpression::Currency((false, 100, 0)),
+                            },
+                            Node::Posting {
+                                account: AccountPath::Virtual("assets:checking:reserved".into()),
+                                value: PostingExpression::Currency((true, 100, 0)),
+                            },
+                            Node::Posting {
+                                account: AccountPath::Virtual("allocations:savings".into()),
+                                value: PostingExpression::Currency((false, 100, 0)),
                             },
                         ]
                     },]
