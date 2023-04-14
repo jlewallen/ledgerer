@@ -366,7 +366,7 @@ pub mod ledger {
             map(
                 preceded(
                     alt((tag(";"), tag("#"))),
-                    preceded(linespace1, terminated(remaining_text, newline)),
+                    terminated(remaining_text, newline),
                 ),
                 |text| Node::Comment(text.into()),
             )(i)
