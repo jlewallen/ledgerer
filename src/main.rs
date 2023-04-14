@@ -30,7 +30,7 @@ pub mod ledger {
             combinator::{map, map_res, opt, recognize},
             error::ParseError,
             multi::{many0, many1},
-            sequence::{delimited, pair, preceded, separated_pair, tuple},
+            sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
             IResult,
         };
 
@@ -93,27 +93,20 @@ pub mod ledger {
             })(i)
         }
 
-        fn parse_directive(i: &str) -> IResult<&str, Node> {
-            alt((
-                parse_transaction,
-                parse_comment,
-                parse_account,
-                parse_tag,
-                parse_include,
-                parse_currency,
-                parse_price,
-                parse_commodity,
-                parse_automatic_transaction,
-            ))(i)
-        }
-
         fn parse_automatic_transaction(i: &str) -> IResult<&str, Node> {
             map(
                 pair(
-                    tuple((preceded(tag("="), whitespace1), payee)), /* Not happy with payee here */
+                    tuple((
+                        preceded(tag("="), linespace1),
+                        terminated(account_path_string, newline),
+                    )),
                     pair(
-                        many0(preceded(ws(tag(";")), parse_note)),
-                        many1(delimited(whitespace1, parse_posting, newline)),
+                        many0(preceded(ws(tag(";")), terminated(parse_note, newline))),
+                        many1(delimited(
+                            linespace1,
+                            parse_posting,
+                            preceded(opt(linespace1), newline),
+                        )),
                     ),
                 ),
                 |((_, path), (notes, postings))| Node::AutomaticTransaction {
@@ -127,9 +120,9 @@ pub mod ledger {
         fn parse_price(i: &str) -> IResult<&str, Node> {
             map(
                 separated_pair(
-                    separated_pair(tag("P"), whitespace1, date_string),
-                    whitespace1,
-                    separated_pair(symbol, whitespace1, posting_expression),
+                    separated_pair(tag("P"), linespace1, date_string),
+                    linespace1,
+                    separated_pair(symbol, linespace1, posting_expression),
                 ),
                 |((_, date), (symbol, expression))| Node::Price((date, symbol.into(), expression)),
             )(i)
@@ -186,13 +179,17 @@ pub mod ledger {
                 pair(
                     tuple((
                         date_string,
-                        opt(preceded(whitespace1, tag("*"))),
-                        whitespace1,
-                        payee,
+                        opt(preceded(linespace1, tag("*"))),
+                        linespace1,
+                        terminated(payee, newline),
                     )),
                     pair(
-                        many0(preceded(ws(tag(";")), parse_note)),
-                        many1(preceded(whitespace1, parse_posting)),
+                        many0(preceded(ws(tag(";")), terminated(parse_note, newline))),
+                        many1(delimited(
+                            linespace1,
+                            parse_posting,
+                            preceded(opt(linespace1), newline),
+                        )),
                     ),
                 ),
                 |((naive_date, cleared, _, payee), (notes, postings))| Node::Transaction {
@@ -265,10 +262,10 @@ pub mod ledger {
                 pair(
                     account_path,
                     pair(
-                        opt(preceded(whitespace1, posting_expression)),
+                        opt(preceded(linespace1, posting_expression)),
                         opt(preceded(
-                            tuple((whitespace1, tag(";"))),
-                            preceded(whitespace1, parse_note),
+                            tuple((linespace1, tag(";"), linespace1)),
+                            parse_note,
                         )),
                     ),
                 ),
@@ -284,7 +281,7 @@ pub mod ledger {
             map(
                 separated_pair(
                     tag("D"),
-                    whitespace1,
+                    linespace1,
                     pair(
                         tag("$"),
                         separated_pair(unsigned_number, tag("."), unsigned_number),
@@ -296,41 +293,36 @@ pub mod ledger {
 
         fn parse_include(i: &str) -> IResult<&str, Node> {
             map(
-                separated_pair(tag("!include"), whitespace1, path),
+                separated_pair(tag("!include"), linespace1, path),
                 |(_, path)| Node::Include(path.into()),
             )(i)
         }
 
         fn parse_account(i: &str) -> IResult<&str, Node> {
             map(
-                separated_pair(tag("account"), whitespace1, account_path),
+                separated_pair(tag("account"), linespace1, account_path),
                 |(_, path)| Node::Account(path.into()),
             )(i)
         }
 
         fn parse_comment(i: &str) -> IResult<&str, Node> {
             map(
-                separated_pair(tag(";"), whitespace1, parse_rest_of_comment),
+                separated_pair(alt((tag(";"), tag("#"))), linespace1, parse_rest_of_comment),
                 |(_, comment)| Node::Comment(comment.into()),
             )(i)
         }
 
         fn parse_tag(i: &str) -> IResult<&str, Node> {
-            map(
-                separated_pair(tag("tag"), whitespace1, path),
-                |(_, path)| Node::Tag(path.into()),
-            )(i)
+            map(separated_pair(tag("tag"), linespace1, path), |(_, path)| {
+                Node::Tag(path.into())
+            })(i)
         }
 
         fn parse_commodity(i: &str) -> IResult<&str, Node> {
             map(
-                separated_pair(tag("commodity"), whitespace1, symbol),
+                separated_pair(tag("commodity"), linespace1, symbol),
                 |(_, symbol)| Node::Commodity(symbol.into()),
             )(i)
-        }
-
-        fn whitespace1(i: &str) -> IResult<&str, &str> {
-            take_while1(move |c| " \r\n\t".contains(c))(i)
         }
 
         /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
@@ -344,8 +336,25 @@ pub mod ledger {
             delimited(multispace0, inner, multispace0)
         }
 
+        fn parse_directive(i: &str) -> IResult<&str, Node> {
+            alt((
+                parse_transaction,
+                parse_comment,
+                parse_account,
+                parse_tag,
+                parse_include,
+                parse_currency,
+                parse_price,
+                parse_commodity,
+                parse_automatic_transaction,
+            ))(i)
+        }
+
         pub fn parse_str(i: &str) -> Result<Vec<Node>> {
-            let (_, nodes) = many0(ws(parse_directive))(i).map_err(|e| anyhow!("{:?}", e))?;
+            let (remaining, nodes) =
+                many0(ws(parse_directive))(i).map_err(|e| anyhow!("{:?}", e))?;
+
+            assert_eq!(remaining, "");
 
             Ok(nodes)
         }
@@ -509,6 +518,39 @@ pub mod ledger {
                             ]
                         },
                     ]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_transaction_basic_with_whitespace_after_posting() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+2023/04/09 income
+    income                      -$100.00    
+    assets:checking              $100.00
+"
+                    )?,
+                    vec![Node::Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 04, 09).unwrap(),
+                        payee: "income".into(),
+                        notes: Vec::new(),
+                        cleared: false,
+                        postings: vec![
+                            Node::Posting {
+                                account: AccountPath::Real("income".into()),
+                                value: Some(PostingExpression::Literal(Numeric::Negative(100, 0))),
+                                notes: None,
+                            },
+                            Node::Posting {
+                                account: AccountPath::Real("assets:checking".into()),
+                                value: Some(PostingExpression::Literal(Numeric::Positive(100, 0))),
+                                notes: None,
+                            },
+                        ]
+                    },]
                 );
 
                 Ok(())
@@ -914,6 +956,40 @@ account [allocations:checking]
                     vec![Node::AutomaticTransaction {
                         path: "assets:savings:ktc".into(),
                         notes: vec![],
+                        postings: vec![
+                            Node::Posting {
+                                account: AccountPath::Virtual(
+                                    "allocations:checking:savings:main".into()
+                                ),
+                                value: Some(PostingExpression::Factor((true, 1))),
+                                notes: None,
+                            },
+                            Node::Posting {
+                                account: AccountPath::Virtual("assets:checking:reserved".into()),
+                                value: Some(PostingExpression::Factor((false, 1))),
+                                notes: None,
+                            },
+                        ]
+                    },]
+                );
+
+                Ok(())
+            }
+
+            #[test]
+            fn test_parse_automatic_transaction_with_note() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+= assets:savings:ktc
+    ; :automatic:
+    [allocations:checking:savings:main]                 (-1)
+    [assets:checking:reserved]                           (1)
+"
+                    )?,
+                    vec![Node::AutomaticTransaction {
+                        path: "assets:savings:ktc".into(),
+                        notes: vec![":automatic:".into()],
                         postings: vec![
                             Node::Posting {
                                 account: AccountPath::Virtual(
