@@ -1,20 +1,26 @@
-use std::fs;
+use std::path::Path;
 
 use anyhow::Result;
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     for arg in args {
-        println!("parsing {}", arg);
-        let data = fs::read_to_string(arg)?;
-        let _nodes = ledger::files::parse_str(&data)?;
+        let file = ledger::parsing::LedgerFile::parse(&Path::new(&arg))?;
+        let processed = file.preprocess()?;
+
+        _ = processed
     }
 
     Ok(())
 }
 
 pub mod ledger {
-    pub mod files {
+    pub mod parsing {
+        use std::{
+            fs,
+            path::{Path, PathBuf},
+        };
+
         use anyhow::{anyhow, Result};
 
         use chrono::NaiveDate;
@@ -88,6 +94,7 @@ pub mod ledger {
             AccountDeclaration(AccountPath),
             TagDeclaration(String),
             Include(String),
+            Included(Vec<Node>),
             DefaultCommodity(String),
             CommodityPrice(CommodityPrice),
             CommodityDeclaration(String),
@@ -384,6 +391,69 @@ pub mod ledger {
                 many0(ws(parse_directive))(i).map_err(|e| anyhow!("{:?}", e))?;
 
             assert_eq!(remaining, "");
+
+            Ok(nodes)
+        }
+
+        #[derive(Debug)]
+        pub struct LedgerFile {
+            path: PathBuf,
+            nodes: Vec<Node>,
+        }
+
+        impl LedgerFile {
+            pub fn parse(path: &Path) -> Result<Self> {
+                println!("parsing {:?}", path);
+
+                let data = fs::read_to_string(path)?;
+                let nodes = parse_str(&data)?;
+
+                Ok(LedgerFile {
+                    path: path.to_owned(),
+                    nodes,
+                })
+            }
+
+            pub fn preprocess(self) -> Result<LedgerFile> {
+                println!("preprocessing {:?}", self.path);
+
+                let relative = self
+                    .path
+                    .parent()
+                    .ok_or(anyhow!("Expected parent directory: {:?}", self.path))?;
+
+                let nodes = self
+                    .nodes
+                    .into_iter()
+                    .map(|node| match node {
+                        Node::Include(include_path_or_glob) => Ok(Node::Included(include_glob(
+                            &relative
+                                .join(include_path_or_glob)
+                                .to_str()
+                                .ok_or(anyhow!("Expected friendlier path"))?,
+                        )?)),
+                        _ => Ok(node),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
+                Ok(Self {
+                    path: self.path,
+                    nodes,
+                })
+            }
+        }
+
+        fn include_glob(path: &str) -> Result<Vec<Node>> {
+            use glob::glob;
+
+            let files = glob(path)?
+                .map(|entry| Ok(LedgerFile::parse(&entry?)?.preprocess()?))
+                .collect::<Result<Vec<_>>>()?;
+
+            let nodes = files
+                .into_iter()
+                .map(|file| Node::Included(file.nodes))
+                .collect();
 
             Ok(nodes)
         }
