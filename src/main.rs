@@ -5,6 +5,7 @@ use chrono::{NaiveDateTime, NaiveTime, Utc};
 use chrono_tz::US::Pacific;
 use clap::{arg, Parser, Subcommand};
 use itertools::Itertools;
+use regex::Regex;
 use std::{collections::HashMap, path::PathBuf, time::Instant};
 #[allow(unused_imports)]
 use tracing::*;
@@ -27,7 +28,7 @@ struct Cli {
 enum Commands {
     Json,
     Balances {
-        prefix: Option<String>,
+        pattern: Option<String>,
         #[arg(short, long)]
         show_postings: bool,
         #[arg(short, long)]
@@ -71,7 +72,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some(Commands::Balances {
-            prefix,
+            pattern,
             show_postings,
             cleared,
         }) => {
@@ -83,6 +84,7 @@ fn main() -> Result<()> {
                 .collect::<Vec<_>>();
 
             let mut accounts: HashMap<String, BigDecimal> = HashMap::new();
+            let compiled = pattern.as_ref().map(|p| Regex::new(&p));
 
             for tx in sorted.iter() {
                 let and_time = NaiveDateTime::new(tx.date, NaiveTime::MIN);
@@ -94,11 +96,14 @@ fn main() -> Result<()> {
                 for posting in tx.postings.iter() {
                     if let Some(value) = posting.has_value() {
                         let account = posting.account.as_str();
-                        let including = if let Some(prefix) = prefix {
-                            account.starts_with(prefix)
-                        } else {
-                            true
+                        let including = {
+                            if let Some(Ok(compiled)) = &compiled {
+                                compiled.is_match(account)
+                            } else {
+                                true
+                            }
                         };
+
                         if including {
                             if *show_postings {
                                 println!("{} {} '{}' {}", tx.date, account, tx.payee, value);
@@ -113,11 +118,12 @@ fn main() -> Result<()> {
                 }
             }
 
-            if let Some(max_key_len) = accounts.keys().map(|k| k.len()).max() {
+            if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
                 for key in accounts.keys().sorted() {
                     let value = accounts.get(key).unwrap();
                     if !value.is_zero() {
-                        println!("{:width$} {:>10}", key, value, width = max_key_len);
+                        // println!("{:width$} {:>10}", key, value, width = max_key_len);
+                        println!("{:>20} {}", value, key);
                     }
                 }
             }
