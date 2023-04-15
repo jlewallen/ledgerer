@@ -63,7 +63,7 @@ fn main() -> Result<()> {
             let processed = get_processed()?;
 
             let sorted = processed
-                .iter_transactions_in_temporal_order()
+                .iter_transactions_in_order()
                 .filter(|t| t.is_simple())
                 .collect::<Vec<_>>();
 
@@ -77,14 +77,17 @@ fn main() -> Result<()> {
             cleared,
         }) => {
             let processed = get_processed()?;
-
+            let compiled = pattern
+                .clone()
+                .map(|p| Regex::new(&p))
+                .map_or(Ok(None), |v| v.map(Some))?; // YES! https://users.rust-lang.org/t/convenience-method-for-flipping-option-result-to-result-option/13695/10
+                                                     // x.map_or(Ok(None), |v| v.map(Some))
             let sorted = processed
-                .iter_transactions_in_temporal_order()
+                .iter_transactions_in_order()
                 .filter(|t| t.is_simple() && (!(*cleared) || t.cleared))
                 .collect::<Vec<_>>();
 
             let mut accounts: HashMap<String, BigDecimal> = HashMap::new();
-            let compiled = pattern.as_ref().map(|p| Regex::new(&p));
 
             for tx in sorted.iter() {
                 let and_time = NaiveDateTime::new(tx.date, NaiveTime::MIN);
@@ -97,7 +100,7 @@ fn main() -> Result<()> {
                     if let Some(value) = posting.has_value() {
                         let account = posting.account.as_str();
                         let including = {
-                            if let Some(Ok(compiled)) = &compiled {
+                            if let Some(compiled) = &compiled {
                                 compiled.is_match(account)
                             } else {
                                 true
@@ -801,9 +804,7 @@ pub mod ledger {
                 })
             }
 
-            pub fn iter_transactions_in_temporal_order(
-                &self,
-            ) -> impl Iterator<Item = &Transaction> {
+            pub fn iter_transactions_in_order(&self) -> impl Iterator<Item = &Transaction> {
                 let mut txs: Vec<&Transaction> = self.iter_transactions().collect();
                 txs.sort_unstable_by_key(|i| (i.date, &i.payee));
                 txs.into_iter()
