@@ -1,4 +1,5 @@
 use anyhow::Result;
+#[allow(unused_imports)]
 use bigdecimal::{BigDecimal, Zero};
 use std::{path::Path, time::Instant};
 #[allow(unused_imports)]
@@ -12,7 +13,7 @@ fn main() -> Result<()> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(get_rust_log()))
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .init();
 
     let args: Vec<_> = std::env::args().skip(1).collect();
@@ -27,6 +28,7 @@ fn main() -> Result<()> {
             loaded
         };
 
+        /*
         let mut total = bigdecimal::BigDecimal::zero();
         for tx in processed.iter_transactions() {
             for posting in tx.postings.iter() {
@@ -47,8 +49,11 @@ fn main() -> Result<()> {
                 }
             }
         }
+        */
 
-        let sorted: Vec<_> = processed.iter_transactions_in_temporal_order().collect();
+        let sorted = processed
+            .iter_transactions_in_temporal_order()
+            .collect::<Vec<_>>();
 
         println!("{}", serde_json::to_string(&sorted)?);
     }
@@ -61,6 +66,7 @@ pub mod ledger {
         use std::{
             fs,
             path::{Path, PathBuf},
+            sync::atomic::AtomicU64,
         };
 
         use anyhow::{anyhow, Result};
@@ -132,6 +138,7 @@ pub mod ledger {
             pub cleared: bool,
             pub notes: Vec<String>,
             pub postings: Vec<Posting>,
+            pub mid: Option<String>,
         }
 
         impl Serialize for Transaction {
@@ -139,10 +146,11 @@ pub mod ledger {
             where
                 S: serde::Serializer,
             {
-                let mut state = serializer.serialize_struct("Transaction", 3)?;
+                let mut state = serializer.serialize_struct("Transaction", 6)?;
                 state.serialize_field("date", &format!("{:?}", &self.date))?;
                 state.serialize_field("payee", &self.payee)?;
                 state.serialize_field("cleared", &self.cleared)?;
+                state.serialize_field("mid", &self.mid)?;
                 state.serialize_field("notes", &self.notes)?;
                 state.serialize_field("postings", &self.postings)?;
                 state.end()
@@ -150,7 +158,7 @@ pub mod ledger {
         }
 
         impl Transaction {
-            fn balanced(self) -> Result<Self> {
+            fn into_balanced(self) -> Result<Self> {
                 if self.postings.iter().any(|p| p.expression.is_none()) {
                     let total: BigDecimal = self
                         .postings
@@ -168,15 +176,27 @@ pub mod ledger {
                         }
                     }
 
-                    Ok(Transaction {
+                    Ok(Self {
                         date: self.date,
                         payee: self.payee,
                         cleared: self.cleared,
+                        mid: self.mid,
                         notes: self.notes,
                         postings,
                     })
                 } else {
                     Ok(self)
+                }
+            }
+
+            fn into_with_mid(self, mid: String) -> Self {
+                Self {
+                    date: self.date,
+                    payee: self.payee,
+                    cleared: self.cleared,
+                    notes: self.notes,
+                    postings: self.postings,
+                    mid: Some(mid),
                 }
             }
         }
@@ -367,8 +387,9 @@ pub mod ledger {
                     Node::Transaction(Transaction {
                         date,
                         payee: payee.to_string(),
-                        notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
                         cleared: cleared.is_some(),
+                        mid: None,
+                        notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
                         postings,
                     })
                 },
@@ -570,6 +591,13 @@ pub mod ledger {
                 })
             }
 
+            pub fn name(&self) -> Option<&str> {
+                match self.path.file_name() {
+                    Some(name) => name.to_str().into(),
+                    None => None,
+                }
+            }
+
             pub fn preprocess(self) -> Result<LedgerFile> {
                 debug!("preprocessing {:?}", self.path);
 
@@ -578,11 +606,30 @@ pub mod ledger {
                     .parent()
                     .ok_or(anyhow!("Expected parent directory: {:?}", self.path))?;
 
+                let name = self
+                    .name()
+                    .map_or(Err(anyhow!("Unfriendly path")), |f| Ok(f))?
+                    .split(".")
+                    .next()
+                    .map_or(Err(anyhow!("Expected extension on path")), |f| Ok(f))?
+                    .to_ascii_uppercase();
+
+                let counter = AtomicU64::new(1);
+                let new_mid = move || {
+                    format!(
+                        "{}-{}",
+                        name,
+                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    )
+                };
+
                 let nodes = self
                     .nodes
                     .into_iter()
                     .map(|node| match node {
-                        Node::Transaction(tx) => Ok(Node::Transaction(tx.balanced()?)),
+                        Node::Transaction(tx) => Ok(Node::Transaction(
+                            tx.into_with_mid(new_mid()).into_balanced()?,
+                        )),
                         Node::Include(include_path_or_glob) => Ok(Node::Included(include_glob(
                             &relative
                                 .join(include_path_or_glob)
@@ -719,8 +766,9 @@ pub mod ledger {
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
-                        notes: Vec::new(),
                         cleared: false,
+                        mid: None,
+                        notes: Vec::new(),
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
@@ -757,8 +805,9 @@ pub mod ledger {
                         Node::Transaction(Transaction {
                             date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                             payee: "withdrawl 1".into(),
-                            notes: Vec::new(),
                             cleared: false,
+                            mid: None,
+                            notes: Vec::new(),
                             postings: vec![
                                 Posting {
                                     account: AccountPath::Real("assets:cash".into()),
@@ -779,8 +828,9 @@ pub mod ledger {
                         Node::Transaction(Transaction {
                             date: NaiveDate::from_ymd_opt(2023, 4, 10).unwrap(),
                             payee: "withdrawl 2".into(),
-                            notes: Vec::new(),
                             cleared: false,
+                            mid: None,
+                            notes: Vec::new(),
                             postings: vec![
                                 Posting {
                                     account: AccountPath::Real("assets:cash".into()),
@@ -817,8 +867,9 @@ pub mod ledger {
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "income".into(),
-                        notes: Vec::new(),
                         cleared: false,
+                        mid: None,
+                        notes: Vec::new(),
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("income".into()),
@@ -852,8 +903,9 @@ pub mod ledger {
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "income".into(),
-                        notes: Vec::new(),
                         cleared: false,
+                        mid: None,
+                        notes: Vec::new(),
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("income".into()),
@@ -897,6 +949,7 @@ pub mod ledger {
                         payee: "another example".into(),
                         notes: Vec::new(),
                         cleared: true,
+                        mid: None,
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
@@ -930,6 +983,7 @@ pub mod ledger {
                         payee: "withdrawl with more text".into(),
                         notes: Vec::new(),
                         cleared: true,
+                        mid: None,
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
@@ -961,8 +1015,9 @@ pub mod ledger {
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
-                        notes: Vec::new(),
                         cleared: false,
+                        mid: None,
+                        notes: Vec::new(),
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:checking".into()),
@@ -994,8 +1049,9 @@ pub mod ledger {
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
-                        notes: Vec::new(),
                         cleared: false,
+                        mid: None,
+                        notes: Vec::new(),
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
@@ -1028,8 +1084,9 @@ pub mod ledger {
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
-                        notes: vec!["hello-world".into()],
                         cleared: false,
+                        mid: None,
+                        notes: vec!["hello-world".into()],
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
@@ -1061,8 +1118,9 @@ pub mod ledger {
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "withdrawl".into(),
-                        notes: vec![],
                         cleared: false,
+                        mid: None,
+                        notes: vec![],
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
@@ -1161,8 +1219,9 @@ account [allocations:checking]
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "opening".into(),
-                        notes: vec![],
                         cleared: false,
+                        mid: None,
+                        notes: vec![],
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
@@ -1204,8 +1263,9 @@ account [allocations:checking]
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                         payee: "opening".into(),
-                        notes: vec![],
                         cleared: false,
+                        mid: None,
+                        notes: vec![],
                         postings: vec![
                             Posting {
                                 account: AccountPath::Real("assets:cash".into()),
