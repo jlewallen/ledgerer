@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 #[allow(unused_imports)]
 use bigdecimal::{BigDecimal, Zero};
-use chrono::{NaiveDateTime, NaiveTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use chrono_tz::US::Pacific;
 use clap::{arg, Parser, Subcommand};
 use itertools::Itertools;
@@ -34,6 +34,14 @@ enum Commands {
         #[arg(short, long)]
         cleared: bool,
     },
+}
+
+fn naive_to_pacific(date: NaiveDate) -> Result<DateTime<chrono_tz::Tz>> {
+    let and_time = NaiveDateTime::new(date, NaiveTime::MIN);
+    Ok(and_time
+        .and_local_timezone(Pacific)
+        .single()
+        .ok_or_else(|| anyhow!("Error converting NaiveDate."))?)
 }
 
 fn main() -> Result<()> {
@@ -73,53 +81,54 @@ fn main() -> Result<()> {
         }
         Some(Commands::Balances {
             pattern,
-            show_postings,
+            show_postings: _show_postings,
             cleared,
         }) => {
             let processed = get_processed()?;
             let compiled = pattern
                 .clone()
                 .map(|p| Regex::new(&p))
-                .map_or(Ok(None), |v| v.map(Some))?; // YES! https://users.rust-lang.org/t/convenience-method-for-flipping-option-result-to-result-option/13695/10
-                                                     // x.map_or(Ok(None), |v| v.map(Some))
+                // YES! https://users.rust-lang.org/t/convenience-method-for-flipping-option-result-to-result-option/13695/10
+                // x.map_or(Ok(None), |v| v.map(Some))
+                .map_or(Ok(None), |v| v.map(Some))
+                .unwrap();
             let sorted = processed
                 .iter_transactions_in_order()
                 .filter(|t| t.is_simple() && (!(*cleared) || t.cleared))
                 .collect::<Vec<_>>();
 
-            let mut accounts: HashMap<String, BigDecimal> = HashMap::new();
+            let past_only = sorted
+                .iter()
+                .filter(|tx| naive_to_pacific(tx.date).unwrap() < Utc::now());
 
-            for tx in sorted.iter() {
-                let and_time = NaiveDateTime::new(tx.date, NaiveTime::MIN);
-                let pacific = and_time.and_local_timezone(Pacific).single().unwrap();
-                if pacific > Utc::now() {
-                    continue;
-                }
-
-                for posting in tx.postings.iter() {
-                    if let Some(value) = posting.has_value() {
-                        let account = posting.account.as_str();
-                        let including = {
+            let accounts: HashMap<&str, BigDecimal> = past_only
+                .flat_map(|tx| {
+                    tx.postings
+                        .iter()
+                        .filter(|p| {
                             if let Some(compiled) = &compiled {
-                                compiled.is_match(account)
+                                compiled.is_match(p.account.as_str())
                             } else {
                                 true
                             }
-                        };
-
-                        if including {
-                            if *show_postings {
-                                println!("{} {} '{}' {}", tx.date, account, tx.payee, value);
-                            }
-                            if !accounts.contains_key(account) {
-                                accounts.insert(account.to_owned(), value);
+                        })
+                        .filter_map(|p| {
+                            if let Some(value) = p.has_value() {
+                                Some((p.account.as_str(), value))
                             } else {
-                                *accounts.get_mut(account).unwrap() += value
+                                None
                             }
-                        }
+                        })
+                })
+                // This is easier than trying to get this to work with group_by
+                .fold(HashMap::new(), |mut acc, (a, v)| {
+                    if !acc.contains_key(a) {
+                        acc.insert(a, v);
+                    } else {
+                        *acc.get_mut(a).unwrap() += v
                     }
-                }
-            }
+                    acc
+                });
 
             if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
                 for key in accounts.keys().sorted() {
