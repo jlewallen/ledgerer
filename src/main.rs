@@ -28,29 +28,6 @@ fn main() -> Result<()> {
             loaded
         };
 
-        /*
-        let mut total = bigdecimal::BigDecimal::zero();
-        for tx in processed.iter_transactions() {
-            for posting in tx.postings.iter() {
-                total += match &posting.account {
-                    ledger::parsing::AccountPath::Real(name) => {
-                        if name == "assets:checking" {
-                            let value = posting.has_value();
-                            // println!("{:?} {} {} {:?}", tx.date, name, tx.payee, value);
-                            match value {
-                                Some(value) => value,
-                                _ => BigDecimal::zero(),
-                            }
-                        } else {
-                            BigDecimal::zero()
-                        }
-                    }
-                    _ => BigDecimal::zero(),
-                }
-            }
-        }
-        */
-
         let sorted = processed
             .iter_transactions_in_temporal_order()
             .filter(|t| t.is_simple())
