@@ -45,7 +45,7 @@ fn main() -> Result<()> {
         let _span = span!(Level::INFO, "loading").entered();
         let started = Instant::now();
         let file = ledger::parsing::LedgerFile::parse(&cli.path)?;
-        let loaded = file.preprocess()?;
+        let loaded = file.preprocess()?.apply_automatic_transactions()?;
         let elapsed = Instant::now() - started;
         info!("loaded ledger in {:?}ms", elapsed);
         Ok(loaded)
@@ -66,8 +66,6 @@ fn main() -> Result<()> {
         }
         Some(Commands::Balances { prefix }) => {
             let processed = get_processed()?;
-
-            let processed = processed.apply_automatic_transactions()?;
 
             let sorted = processed
                 .iter_transactions_in_temporal_order()
@@ -106,13 +104,12 @@ fn main() -> Result<()> {
                 }
             }
 
-            let max_key_len = accounts.keys().map(|k| k.len()).max().unwrap();
-            let keys = accounts.keys().sorted();
-
-            for key in keys {
-                let value = accounts.get(key).unwrap();
-                if !value.is_zero() {
-                    println!("{:width$} {:>10}", key, value, width = max_key_len);
+            if let Some(max_key_len) = accounts.keys().map(|k| k.len()).max() {
+                for key in accounts.keys().sorted() {
+                    let value = accounts.get(key).unwrap();
+                    if !value.is_zero() {
+                        println!("{:width$} {:>10}", key, value, width = max_key_len);
+                    }
                 }
             }
 
