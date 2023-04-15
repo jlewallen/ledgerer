@@ -31,7 +31,7 @@ enum Commands {
 
 fn main() -> Result<()> {
     fn get_rust_log() -> String {
-        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into())
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "error".into())
     }
 
     tracing_subscriber::registry()
