@@ -53,6 +53,7 @@ fn main() -> Result<()> {
 
         let sorted = processed
             .iter_transactions_in_temporal_order()
+            .filter(|t| t.is_simple())
             .collect::<Vec<_>>();
 
         println!("{}", serde_json::to_string(&sorted)?);
@@ -147,7 +148,7 @@ pub mod ledger {
                 S: serde::Serializer,
             {
                 let mut state = serializer.serialize_struct("Transaction", 6)?;
-                state.serialize_field("date", &format!("{:?}", &self.date))?;
+                state.serialize_field("date", &format!("{:?}T00:00:00", &self.date))?; // TODO
                 state.serialize_field("payee", &self.payee)?;
                 state.serialize_field("cleared", &self.cleared)?;
                 state.serialize_field("mid", &self.mid)?;
@@ -158,6 +159,10 @@ pub mod ledger {
         }
 
         impl Transaction {
+            pub fn is_simple(&self) -> bool {
+                !self.postings.iter().any(|p| p.has_value().is_none())
+            }
+
             fn into_balanced(self) -> Result<Self> {
                 if self.postings.iter().any(|p| p.expression.is_none()) {
                     let total: BigDecimal = self
