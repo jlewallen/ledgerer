@@ -1,10 +1,29 @@
 use anyhow::Result;
 #[allow(unused_imports)]
 use bigdecimal::{BigDecimal, Zero};
-use std::{path::Path, time::Instant};
+use clap::{arg, Parser, Subcommand};
+use itertools::Itertools;
+use std::{collections::HashMap, path::PathBuf, time::Instant};
 #[allow(unused_imports)]
 use tracing::*;
 use tracing_subscriber::prelude::*;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[arg(short, long, value_name = "FILE")]
+    path: PathBuf,
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Json,
+    Balances,
+}
 
 fn main() -> Result<()> {
     fn get_rust_log() -> String {
@@ -16,27 +35,76 @@ fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .init();
 
-    let args: Vec<_> = std::env::args().skip(1).collect();
-    for arg in args {
-        let processed = {
-            let _span = span!(Level::INFO, "loading").entered();
-            let started = Instant::now();
-            let file = ledger::parsing::LedgerFile::parse(&Path::new(&arg))?;
-            let loaded = file.preprocess()?;
-            let elapsed = Instant::now() - started;
-            info!("loaded ledger in {:?}ms", elapsed);
-            loaded
-        };
+    let cli = Cli::parse();
 
-        let sorted = processed
-            .iter_transactions_in_temporal_order()
-            .filter(|t| t.is_simple())
-            .collect::<Vec<_>>();
+    match &cli.command {
+        Some(Commands::Json) => {
+            let processed = {
+                let _span = span!(Level::INFO, "loading").entered();
+                let started = Instant::now();
+                let file = ledger::parsing::LedgerFile::parse(&cli.path)?;
+                let loaded = file.preprocess()?;
+                let elapsed = Instant::now() - started;
+                info!("loaded ledger in {:?}ms", elapsed);
+                loaded
+            };
 
-        println!("{}", serde_json::to_string(&sorted)?);
+            let sorted = processed
+                .iter_transactions_in_temporal_order()
+                .filter(|t| t.is_simple())
+                .collect::<Vec<_>>();
+
+            println!("{}", serde_json::to_string(&sorted)?);
+
+            Ok(())
+        }
+        Some(Commands::Balances) => {
+            let processed = {
+                let _span = span!(Level::INFO, "loading").entered();
+                let started = Instant::now();
+                let file = ledger::parsing::LedgerFile::parse(&cli.path)?;
+                let loaded = file.preprocess()?;
+                let elapsed = Instant::now() - started;
+                info!("loaded ledger in {:?}ms", elapsed);
+                loaded
+            };
+
+            let sorted = processed
+                .iter_transactions_in_temporal_order()
+                .filter(|t| t.is_simple())
+                .collect::<Vec<_>>();
+
+            let mut accounts: HashMap<String, BigDecimal> = HashMap::new();
+
+            for tx in sorted.iter() {
+                for posting in tx.postings.iter() {
+                    match posting.has_value() {
+                        Some(value) => {
+                            if !accounts.contains_key(posting.account.as_str()) {
+                                accounts.insert(posting.account.as_str().to_owned(), value);
+                            } else {
+                                *accounts.get_mut(posting.account.as_str()).unwrap() += value
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+
+            let max_key_len = accounts.keys().map(|k| k.len()).max().unwrap();
+            let keys = accounts.keys().sorted();
+
+            for key in keys {
+                let value = accounts.get(key).unwrap();
+                if !value.is_zero() {
+                    println!("{:width$} {:>10}", key, value, width = max_key_len);
+                }
+            }
+
+            Ok(())
+        }
+        _ => Ok(()),
     }
-
-    Ok(())
 }
 
 pub mod ledger {
