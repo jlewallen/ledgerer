@@ -695,6 +695,12 @@ pub mod ledger {
             Ok(nodes)
         }
 
+        fn mid_factory(prefix: &str) -> impl FnMut() -> String + '_ {
+            use std::sync::atomic::Ordering::SeqCst;
+            let counter = AtomicU64::new(1);
+            move || format!("{}-{}", prefix, counter.fetch_add(1, SeqCst))
+        }
+
         #[derive(Debug)]
         pub struct LedgerFile {
             path: PathBuf,
@@ -732,13 +738,7 @@ pub mod ledger {
                     .flat_map(|tx| automatics.iter().flat_map(|automatic| automatic.apply(tx)))
                     .collect_vec();
 
-                let counter = AtomicU64::new(1);
-                let new_mid = move || {
-                    format!(
-                        "AUTOMATIC-{}",
-                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                    )
-                };
+                let mut new_mid = mid_factory("AUTOMATIC");
 
                 let nodes = self
                     .nodes
@@ -776,14 +776,7 @@ pub mod ledger {
                     .map_or(Err(anyhow!("Expected extension on path")), Ok)?
                     .to_ascii_uppercase();
 
-                let counter = AtomicU64::new(1);
-                let new_mid = move || {
-                    format!(
-                        "{}-{}",
-                        name,
-                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                    )
-                };
+                let mut new_mid = mid_factory(&name);
 
                 let nodes = self
                     .nodes
