@@ -26,7 +26,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Json,
-    Balances { prefix: Option<String> },
+    Balances {
+        prefix: Option<String>,
+        #[arg(short, long)]
+        show_postings: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -47,7 +51,7 @@ fn main() -> Result<()> {
         let file = ledger::parsing::LedgerFile::parse(&cli.path)?;
         let loaded = file.preprocess()?.apply_automatic_transactions()?;
         let elapsed = Instant::now() - started;
-        info!("loaded ledger in {:?}ms", elapsed);
+        info!("loaded in {:?}ms", elapsed);
         Ok(loaded)
     };
 
@@ -64,7 +68,10 @@ fn main() -> Result<()> {
 
             Ok(())
         }
-        Some(Commands::Balances { prefix }) => {
+        Some(Commands::Balances {
+            prefix,
+            show_postings,
+        }) => {
             let processed = get_processed()?;
 
             let sorted = processed
@@ -91,7 +98,9 @@ fn main() -> Result<()> {
                                 true
                             };
                             if including {
-                                // println!("{} {:?} {} {}", tx.date, account, tx.payee, value);
+                                if *show_postings {
+                                    println!("{} {} '{}' {}", tx.date, account, tx.payee, value);
+                                }
                                 if !accounts.contains_key(account) {
                                     accounts.insert(account.to_owned(), value);
                                 } else {
