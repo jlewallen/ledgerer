@@ -92,26 +92,23 @@ fn main() -> Result<()> {
                 }
 
                 for posting in tx.postings.iter() {
-                    match posting.has_value() {
-                        Some(value) => {
-                            let account = posting.account.as_str();
-                            let including = if let Some(prefix) = prefix {
-                                account.starts_with(prefix)
+                    if let Some(value) = posting.has_value() {
+                        let account = posting.account.as_str();
+                        let including = if let Some(prefix) = prefix {
+                            account.starts_with(prefix)
+                        } else {
+                            true
+                        };
+                        if including {
+                            if *show_postings {
+                                println!("{} {} '{}' {}", tx.date, account, tx.payee, value);
+                            }
+                            if !accounts.contains_key(account) {
+                                accounts.insert(account.to_owned(), value);
                             } else {
-                                true
-                            };
-                            if including {
-                                if *show_postings {
-                                    println!("{} {} '{}' {}", tx.date, account, tx.payee, value);
-                                }
-                                if !accounts.contains_key(account) {
-                                    accounts.insert(account.to_owned(), value);
-                                } else {
-                                    *accounts.get_mut(account).unwrap() += value
-                                }
+                                *accounts.get_mut(account).unwrap() += value
                             }
                         }
-                        None => {}
                     }
                 }
             }
@@ -252,7 +249,7 @@ pub mod ledger {
                     let total: BigDecimal = self
                         .postings
                         .iter()
-                        .map(|p| p.has_value().or(Some(BigDecimal::zero())).unwrap())
+                        .map(|p| p.has_value().unwrap_or(BigDecimal::zero()))
                         .collect::<Vec<_>>()
                         .into_iter()
                         .sum();
@@ -299,10 +296,7 @@ pub mod ledger {
 
         impl Posting {
             pub fn has_expression(&self) -> bool {
-                match &self.expression {
-                    None => false,
-                    _ => true,
-                }
+                self.expression.is_some()
             }
 
             pub fn has_literal(&self) -> Option<&Numeric> {
@@ -326,10 +320,7 @@ pub mod ledger {
             where
                 S: serde::Serializer,
             {
-                let value = match self.has_value() {
-                    Some(value) => Some(format!("{}", value)),
-                    None => None,
-                };
+                let value = self.has_value().map(|value| format!("{}", value));
                 let mut state = serializer.serialize_struct("Posting", 3)?;
                 state.serialize_field("account", self.account.as_str())?;
                 state.serialize_field("value", &value)?;
@@ -626,7 +617,7 @@ pub mod ledger {
         fn parse_account_declaration(i: &str) -> IResult<&str, Node> {
             map(
                 preceded(tuple((tag("account"), linespace1)), account_path),
-                |path| Node::AccountDeclaration(path),
+                Node::AccountDeclaration,
             )(i)
         }
 
@@ -719,7 +710,7 @@ pub mod ledger {
 
             pub fn name(&self) -> Option<&str> {
                 match self.path.file_name() {
-                    Some(name) => name.to_str().into(),
+                    Some(name) => name.to_str(),
                     None => None,
                 }
             }
@@ -773,10 +764,10 @@ pub mod ledger {
 
                 let name = self
                     .name()
-                    .map_or(Err(anyhow!("Unfriendly path")), |f| Ok(f))?
-                    .split(".")
+                    .map_or(Err(anyhow!("Unfriendly path")), Ok)?
+                    .split('.')
                     .next()
-                    .map_or(Err(anyhow!("Expected extension on path")), |f| Ok(f))?
+                    .map_or(Err(anyhow!("Expected extension on path")), Ok)?
                     .to_ascii_uppercase();
 
                 let counter = AtomicU64::new(1);
@@ -796,7 +787,7 @@ pub mod ledger {
                             tx.into_with_mid(new_mid()).into_balanced()?,
                         )),
                         Node::Include(include_path_or_glob) => Ok(Node::Included(include_glob(
-                            &relative
+                            relative
                                 .join(include_path_or_glob)
                                 .to_str()
                                 .ok_or(anyhow!("Unfriendly path"))?,
@@ -836,7 +827,7 @@ pub mod ledger {
             }
 
             pub fn iter(&self) -> impl Iterator<Item = &Node> {
-                fn recursively_iter(nodes: &Vec<Node>) -> Box<dyn Iterator<Item = &Node> + '_> {
+                fn recursively_iter(nodes: &[Node]) -> Box<dyn Iterator<Item = &Node> + '_> {
                     Box::new(nodes.iter().flat_map(|node| match node {
                         Node::Included(children) | Node::Generated(children) => {
                             recursively_iter(children)
@@ -853,7 +844,7 @@ pub mod ledger {
             use glob::glob;
 
             let files = glob(path)?
-                .map(|entry| Ok(LedgerFile::parse(&entry?)?.preprocess()?))
+                .map(|entry| LedgerFile::parse(&entry?)?.preprocess())
                 .collect::<Result<Vec<_>>>()?;
 
             let nodes = files
