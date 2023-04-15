@@ -804,9 +804,9 @@ pub mod ledger {
             pub fn iter_transactions_in_temporal_order(
                 &self,
             ) -> impl Iterator<Item = &Transaction> {
-                let mut everything: Vec<&Transaction> = self.iter_transactions().collect();
-                everything.sort_by(|a, b| a.date.cmp(&b.date));
-                everything.into_iter()
+                let mut txs: Vec<&Transaction> = self.iter_transactions().collect();
+                txs.sort_unstable_by_key(|i| (i.date, &i.payee));
+                txs.into_iter()
             }
 
             pub fn iter_transactions(&self) -> impl Iterator<Item = &Transaction> {
