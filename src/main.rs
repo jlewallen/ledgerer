@@ -30,6 +30,8 @@ enum Commands {
         prefix: Option<String>,
         #[arg(short, long)]
         show_postings: bool,
+        #[arg(short, long)]
+        cleared: bool,
     },
 }
 
@@ -71,12 +73,13 @@ fn main() -> Result<()> {
         Some(Commands::Balances {
             prefix,
             show_postings,
+            cleared,
         }) => {
             let processed = get_processed()?;
 
             let sorted = processed
                 .iter_transactions_in_temporal_order()
-                .filter(|t| t.is_simple())
+                .filter(|t| t.is_simple() && (!(*cleared) || t.cleared))
                 .collect::<Vec<_>>();
 
             let mut accounts: HashMap<String, BigDecimal> = HashMap::new();
