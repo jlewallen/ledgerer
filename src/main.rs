@@ -758,7 +758,7 @@ pub mod ledger {
                 info!("done in {:?}ms", elapsed);
 
                 Ok(Self {
-                    path: self.path.clone(),
+                    path: self.path,
                     nodes,
                 })
             }
@@ -820,37 +820,32 @@ pub mod ledger {
             }
 
             pub fn iter_transactions(&self) -> impl Iterator<Item = &Transaction> {
-                fn recursively_iter_txs(
-                    nodes: &Vec<Node>,
-                ) -> Box<dyn Iterator<Item = &Transaction> + '_> {
-                    Box::new(nodes.iter().flat_map(|node| match node {
-                        Node::Transaction(tx) => Box::new(std::iter::once(tx)),
-                        Node::Included(children) | Node::Generated(children) => {
-                            recursively_iter_txs(children)
-                        }
-                        _ => Box::new(std::iter::empty::<&Transaction>()),
-                    }))
-                }
-
-                recursively_iter_txs(&self.nodes)
+                self.iter().filter_map(|node| match node {
+                    Node::Transaction(tx) => Some(tx),
+                    _ => None,
+                })
             }
 
             pub fn iter_automatic_transactions(
                 &self,
             ) -> impl Iterator<Item = &AutomaticTransaction> {
-                fn recursively_iter_txs(
-                    nodes: &Vec<Node>,
-                ) -> Box<dyn Iterator<Item = &AutomaticTransaction> + '_> {
+                self.iter().filter_map(|node| match node {
+                    Node::AutomaticTransaction(tx) => Some(tx),
+                    _ => None,
+                })
+            }
+
+            pub fn iter(&self) -> impl Iterator<Item = &Node> {
+                fn recursively_iter(nodes: &Vec<Node>) -> Box<dyn Iterator<Item = &Node> + '_> {
                     Box::new(nodes.iter().flat_map(|node| match node {
-                        Node::AutomaticTransaction(tx) => Box::new(std::iter::once(tx)),
                         Node::Included(children) | Node::Generated(children) => {
-                            recursively_iter_txs(children)
+                            recursively_iter(children)
                         }
-                        _ => Box::new(std::iter::empty::<&AutomaticTransaction>()),
+                        _ => Box::new(std::iter::once(node)),
                     }))
                 }
 
-                recursively_iter_txs(&self.nodes)
+                recursively_iter(&self.nodes)
             }
         }
 
