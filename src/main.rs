@@ -67,14 +67,7 @@ fn main() -> Result<()> {
         Some(Commands::Balances { prefix }) => {
             let processed = get_processed()?;
 
-            /*
-            for temp in processed
-                .iter_transactions_in_temporal_order()
-                .filter(|t| !t.is_simple())
-            {
-                println!("\n{:?}\n", temp);
-            }
-            */
+            let processed = processed.apply_automatic_transactions()?;
 
             let sorted = processed
                 .iter_transactions_in_temporal_order()
@@ -100,7 +93,7 @@ fn main() -> Result<()> {
                                 true
                             };
                             if including {
-                                println!("{} {:?} {} {}", tx.date, account, tx.payee, value);
+                                // println!("{} {:?} {} {}", tx.date, account, tx.payee, value);
                                 if !accounts.contains_key(account) {
                                     accounts.insert(account.to_owned(), value);
                                 } else {
@@ -135,12 +128,14 @@ pub mod ledger {
             fs,
             path::{Path, PathBuf},
             sync::atomic::AtomicU64,
+            time::Instant,
         };
 
         use anyhow::{anyhow, Result};
 
         use bigdecimal::{BigDecimal, Zero};
         use chrono::NaiveDate;
+        use itertools::Itertools;
         use nom::{
             branch::alt,
             bytes::complete::{tag, take_while1},
@@ -158,7 +153,7 @@ pub mod ledger {
         use serde::{ser::SerializeStruct, Serialize};
         use tracing::*;
 
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, PartialEq, Clone)]
         pub enum AccountPath {
             Real(String),
             Virtual(String),
@@ -228,6 +223,19 @@ pub mod ledger {
         impl Transaction {
             pub fn is_simple(&self) -> bool {
                 !self.postings.iter().any(|p| p.has_value().is_none())
+            }
+
+            pub fn has_posting_for(&self, name: &str) -> bool {
+                self.postings.iter().any(|p| p.account.as_str() == name)
+            }
+
+            pub fn iter_postings_for<'a>(
+                &'a self,
+                name: &'a str,
+            ) -> impl Iterator<Item = &Posting> + 'a {
+                self.postings
+                    .iter()
+                    .filter(move |p| p.account.as_str() == name)
             }
 
             fn into_balanced(self) -> Result<Self> {
@@ -328,6 +336,42 @@ pub mod ledger {
             pub postings: Vec<Posting>,
         }
 
+        impl AutomaticTransaction {
+            pub fn apply(&self, tx: &Transaction) -> Vec<Transaction> {
+                tx.iter_postings_for(&self.condition)
+                    .map(|p| match p.has_value() {
+                        Some(value) => Transaction {
+                            date: tx.date,
+                            payee: tx.payee.clone(),
+                            cleared: tx.cleared,
+                            notes: self.notes.clone(),
+                            postings: self.postings_with_value(value),
+                            mid: None,
+                        },
+                        None => todo!(),
+                    })
+                    .collect_vec()
+            }
+
+            fn postings_with_value(&self, value: BigDecimal) -> Vec<Posting> {
+                self.postings
+                    .iter()
+                    .map(|p| match p.expression {
+                        Some(Expression::Factor((negative, 1))) => Posting {
+                            account: p.account.clone(),
+                            expression: if negative {
+                                Some(Expression::Calculated(-value.clone()))
+                            } else {
+                                Some(Expression::Calculated(value.clone()))
+                            },
+                            note: p.note.clone(),
+                        },
+                        _ => todo!(),
+                    })
+                    .collect_vec()
+            }
+        }
+
         #[derive(Debug, PartialEq)]
         pub struct CommodityPrice {
             pub date: NaiveDate,
@@ -343,6 +387,7 @@ pub mod ledger {
             TagDeclaration(String),
             Include(String),
             Included(Vec<Node>),
+            Generated(Vec<Node>),
             DefaultCommodity(String),
             CommodityPrice(CommodityPrice),
             CommodityDeclaration(String),
@@ -670,6 +715,37 @@ pub mod ledger {
                 }
             }
 
+            pub fn apply_automatic_transactions(self) -> Result<LedgerFile> {
+                let _span = span!(Level::INFO, "auto-txs").entered();
+                let started = Instant::now();
+
+                let automatics: Vec<&AutomaticTransaction> =
+                    self.iter_automatic_transactions().collect_vec();
+                let generated: Vec<Transaction> = self
+                    .iter_transactions()
+                    .flat_map(|tx| automatics.iter().flat_map(|automatic| automatic.apply(tx)))
+                    .collect_vec();
+
+                let nodes = self
+                    .nodes
+                    .into_iter()
+                    .chain(vec![Node::Generated(
+                        generated
+                            .into_iter()
+                            .map(|tx| Node::Transaction(tx))
+                            .collect_vec(),
+                    )])
+                    .collect_vec();
+
+                let elapsed = Instant::now() - started;
+                info!("done in {:?}ms", elapsed);
+
+                Ok(Self {
+                    path: self.path.clone(),
+                    nodes,
+                })
+            }
+
             pub fn preprocess(self) -> Result<LedgerFile> {
                 debug!("preprocessing {:?}", self.path);
 
@@ -732,8 +808,28 @@ pub mod ledger {
                 ) -> Box<dyn Iterator<Item = &Transaction> + '_> {
                     Box::new(nodes.iter().flat_map(|node| match node {
                         Node::Transaction(tx) => Box::new(std::iter::once(tx)),
-                        Node::Included(children) => recursively_iter_txs(children),
+                        Node::Included(children) | Node::Generated(children) => {
+                            recursively_iter_txs(children)
+                        }
                         _ => Box::new(std::iter::empty::<&Transaction>()),
+                    }))
+                }
+
+                recursively_iter_txs(&self.nodes)
+            }
+
+            pub fn iter_automatic_transactions(
+                &self,
+            ) -> impl Iterator<Item = &AutomaticTransaction> {
+                fn recursively_iter_txs(
+                    nodes: &Vec<Node>,
+                ) -> Box<dyn Iterator<Item = &AutomaticTransaction> + '_> {
+                    Box::new(nodes.iter().flat_map(|node| match node {
+                        Node::AutomaticTransaction(tx) => Box::new(std::iter::once(tx)),
+                        Node::Included(children) | Node::Generated(children) => {
+                            recursively_iter_txs(children)
+                        }
+                        _ => Box::new(std::iter::empty::<&AutomaticTransaction>()),
                     }))
                 }
 
