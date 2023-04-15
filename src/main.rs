@@ -735,13 +735,21 @@ pub mod ledger {
                     .flat_map(|tx| automatics.iter().flat_map(|automatic| automatic.apply(tx)))
                     .collect_vec();
 
+                let counter = AtomicU64::new(1);
+                let new_mid = move || {
+                    format!(
+                        "AUTOMATIC-{}",
+                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    )
+                };
+
                 let nodes = self
                     .nodes
                     .into_iter()
                     .chain(vec![Node::Generated(
                         generated
                             .into_iter()
-                            .map(|tx| Node::Transaction(tx))
+                            .map(|tx| Node::Transaction(tx.into_with_mid(new_mid())))
                             .collect_vec(),
                     )])
                     .collect_vec();
