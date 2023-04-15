@@ -1,12 +1,16 @@
 use anyhow::Result;
 #[allow(unused_imports)]
 use bigdecimal::{BigDecimal, Zero};
+use chrono::{NaiveDateTime, NaiveTime, Utc};
+use chrono_tz::US::Pacific;
 use clap::{arg, Parser, Subcommand};
 use itertools::Itertools;
 use std::{collections::HashMap, path::PathBuf, time::Instant};
 #[allow(unused_imports)]
 use tracing::*;
 use tracing_subscriber::prelude::*;
+
+use crate::ledger::parsing::LedgerFile;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -22,7 +26,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Json,
-    Balances,
+    Balances { prefix: Option<String> },
 }
 
 fn main() -> Result<()> {
@@ -37,17 +41,19 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    let get_processed = || -> Result<LedgerFile> {
+        let _span = span!(Level::INFO, "loading").entered();
+        let started = Instant::now();
+        let file = ledger::parsing::LedgerFile::parse(&cli.path)?;
+        let loaded = file.preprocess()?;
+        let elapsed = Instant::now() - started;
+        info!("loaded ledger in {:?}ms", elapsed);
+        Ok(loaded)
+    };
+
     match &cli.command {
         Some(Commands::Json) => {
-            let processed = {
-                let _span = span!(Level::INFO, "loading").entered();
-                let started = Instant::now();
-                let file = ledger::parsing::LedgerFile::parse(&cli.path)?;
-                let loaded = file.preprocess()?;
-                let elapsed = Instant::now() - started;
-                info!("loaded ledger in {:?}ms", elapsed);
-                loaded
-            };
+            let processed = get_processed()?;
 
             let sorted = processed
                 .iter_transactions_in_temporal_order()
@@ -58,16 +64,17 @@ fn main() -> Result<()> {
 
             Ok(())
         }
-        Some(Commands::Balances) => {
-            let processed = {
-                let _span = span!(Level::INFO, "loading").entered();
-                let started = Instant::now();
-                let file = ledger::parsing::LedgerFile::parse(&cli.path)?;
-                let loaded = file.preprocess()?;
-                let elapsed = Instant::now() - started;
-                info!("loaded ledger in {:?}ms", elapsed);
-                loaded
-            };
+        Some(Commands::Balances { prefix }) => {
+            let processed = get_processed()?;
+
+            /*
+            for temp in processed
+                .iter_transactions_in_temporal_order()
+                .filter(|t| !t.is_simple())
+            {
+                println!("\n{:?}\n", temp);
+            }
+            */
 
             let sorted = processed
                 .iter_transactions_in_temporal_order()
@@ -77,13 +84,28 @@ fn main() -> Result<()> {
             let mut accounts: HashMap<String, BigDecimal> = HashMap::new();
 
             for tx in sorted.iter() {
+                let and_time = NaiveDateTime::new(tx.date, NaiveTime::MIN);
+                let pacific = and_time.and_local_timezone(Pacific).single().unwrap();
+                if pacific > Utc::now() {
+                    continue;
+                }
+
                 for posting in tx.postings.iter() {
                     match posting.has_value() {
                         Some(value) => {
-                            if !accounts.contains_key(posting.account.as_str()) {
-                                accounts.insert(posting.account.as_str().to_owned(), value);
+                            let account = posting.account.as_str();
+                            let including = if let Some(prefix) = prefix {
+                                account.starts_with(prefix)
                             } else {
-                                *accounts.get_mut(posting.account.as_str()).unwrap() += value
+                                true
+                            };
+                            if including {
+                                println!("{} {:?} {} {}", tx.date, account, tx.payee, value);
+                                if !accounts.contains_key(account) {
+                                    accounts.insert(account.to_owned(), value);
+                                } else {
+                                    *accounts.get_mut(account).unwrap() += value
+                                }
                             }
                         }
                         None => {}
