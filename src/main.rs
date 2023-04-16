@@ -824,7 +824,7 @@ pub mod ledger {
             }
 
             pub fn iter_transactions(&self) -> impl Iterator<Item = &Transaction> {
-                self.iter().filter_map(|node| match node {
+                self.recursive_iter().filter_map(|node| match node {
                     Node::Transaction(tx) => Some(tx),
                     _ => None,
                 })
@@ -833,16 +833,16 @@ pub mod ledger {
             pub fn iter_automatic_transactions(
                 &self,
             ) -> impl Iterator<Item = &AutomaticTransaction> {
-                self.iter().filter_map(|node| match node {
+                self.recursive_iter().filter_map(|node| match node {
                     Node::AutomaticTransaction(tx) => Some(tx),
                     _ => None,
                 })
             }
 
-            pub fn iter(&self) -> impl Iterator<Item = &Node> {
+            pub fn recursive_iter(&self) -> impl Iterator<Item = &Node> {
                 fn recursively_iter(nodes: &[Node]) -> Box<dyn Iterator<Item = &Node> + '_> {
                     Box::new(nodes.iter().flat_map(|node| match node {
-                        Node::Included(children) | Node::Generated(children) => {
+                        Node::Included(_, children) | Node::Generated(children) => {
                             recursively_iter(children)
                         }
                         _ => Box::new(std::iter::once(node)),
@@ -850,6 +850,10 @@ pub mod ledger {
                 }
 
                 recursively_iter(&self.nodes)
+            }
+
+            pub fn nodes_iter(&self) -> impl Iterator<Item = &Node> {
+                self.nodes.iter()
             }
         }
 
