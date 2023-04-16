@@ -142,6 +142,7 @@ fn main() -> Result<()> {
 
             Ok(())
         }
+
         _ => Ok(()),
     }
 }
@@ -162,7 +163,7 @@ pub mod ledger {
         use itertools::Itertools;
         use nom::{
             branch::alt,
-            bytes::complete::{tag, take_while1},
+            bytes::complete::{tag, take_while, take_while1},
             character::{
                 self,
                 complete::{alpha1, digit1, multispace0, newline},
@@ -660,7 +661,7 @@ pub mod ledger {
         }
 
         fn remaining_text(i: &str) -> IResult<&str, &str> {
-            take_while1(move |c: char| !character::is_newline(c as u8))(i)
+            take_while(move |c: char| !character::is_newline(c as u8))(i)
         }
 
         fn parse_comment(i: &str) -> IResult<&str, Node> {
