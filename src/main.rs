@@ -39,10 +39,10 @@ enum Commands {
 
 fn naive_to_pacific(date: NaiveDate) -> Result<DateTime<chrono_tz::Tz>> {
     let and_time = NaiveDateTime::new(date, NaiveTime::MIN);
-    Ok(and_time
+    and_time
         .and_local_timezone(Pacific)
         .single()
-        .ok_or_else(|| anyhow!("Error converting NaiveDate."))?)
+        .ok_or_else(|| anyhow!("Error converting NaiveDate."))
 }
 
 fn main() -> Result<()> {
@@ -137,7 +137,7 @@ fn main() -> Result<()> {
                             print!(
                                 "{:100}",
                                 match &p.account {
-                                    AccountPath::Real(name) => format!("{}", name),
+                                    AccountPath::Real(name) => name.to_string(),
                                     AccountPath::Virtual(name) => format!("[{}]", name),
                                 }
                             );
@@ -153,7 +153,7 @@ fn main() -> Result<()> {
                                 None => println!(),
                             }
                         }
-                        println!("");
+                        println!();
                     }
                     Node::AccountDeclaration(ap) => println!("account {}", ap.as_str()),
                     Node::TagDeclaration(tag) => println!("tag {}", tag),
@@ -208,11 +208,7 @@ fn main() -> Result<()> {
                             }
                         })
                         .filter_map(|p| {
-                            if let Some(value) = p.has_value() {
-                                Some((p.account.as_str(), value))
-                            } else {
-                                None
-                            }
+                            p.has_value().map(|value| (p.account.as_str(), value))
                         })
                 })
                 // This is easier than trying to get this to work with group_by
