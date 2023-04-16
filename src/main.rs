@@ -174,7 +174,7 @@ fn main() -> Result<()> {
                         symbol,
                         print_expression(expression)
                     ),
-                    Node::CommodityDeclaration(_) => println!(),
+                    Node::CommodityDeclaration(symbol) => println!("commodity {}", symbol),
                     Node::AutomaticTransaction(tx) => {
                         println!("= {}", tx.condition);
                         for n in tx.notes.iter() {
@@ -798,7 +798,10 @@ pub mod ledger {
 
         fn parse_commodity_declaration(i: &str) -> IResult<&str, Node> {
             map(
-                preceded(tuple((tag("commodity"), linespace1)), symbol),
+                terminated(
+                    preceded(tuple((tag("commodity"), linespace1)), symbol),
+                    opt(newline),
+                ),
                 |symbol| Node::CommodityDeclaration(symbol.into()),
             )(i)
         }
