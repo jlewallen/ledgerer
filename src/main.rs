@@ -405,7 +405,7 @@ pub mod ledger {
             AccountDeclaration(AccountPath),
             TagDeclaration(String),
             Include(String),
-            Included(Vec<Node>),
+            Included(String, Vec<Node>),
             Generated(Vec<Node>),
             DefaultCommodity(String),
             CommodityPrice(CommodityPrice),
@@ -798,12 +798,15 @@ pub mod ledger {
                         Node::Transaction(tx) => Ok(Node::Transaction(
                             tx.into_with_mid(new_mid()).into_balanced()?,
                         )),
-                        Node::Include(include_path_or_glob) => Ok(Node::Included(include_glob(
-                            relative
-                                .join(include_path_or_glob)
-                                .to_str()
-                                .ok_or(anyhow!("Unfriendly path"))?,
-                        )?)),
+                        Node::Include(include_path_or_glob) => Ok(Node::Included(
+                            include_path_or_glob.clone(),
+                            include_glob(
+                                relative
+                                    .join(&include_path_or_glob)
+                                    .to_str()
+                                    .ok_or(anyhow!("Unfriendly path"))?,
+                            )?,
+                        )),
                         _ => Ok(node),
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -859,7 +862,7 @@ pub mod ledger {
 
             let nodes = files
                 .into_iter()
-                .map(|file| Node::Included(file.nodes))
+                .map(|file| Node::Included(path.to_owned(), file.nodes))
                 .collect();
 
             Ok(nodes)
