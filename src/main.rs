@@ -11,7 +11,7 @@ use std::{collections::HashMap, path::PathBuf, time::Instant};
 use tracing::*;
 use tracing_subscriber::prelude::*;
 
-use crate::ledger::parsing::LedgerFile;
+use crate::ledger::parsing::{CommodityPrice, LedgerFile};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -34,6 +34,7 @@ enum Commands {
         #[arg(short, long)]
         cleared: bool,
     },
+    Print,
 }
 
 fn naive_to_pacific(date: NaiveDate) -> Result<DateTime<chrono_tz::Tz>> {
@@ -76,6 +77,100 @@ fn main() -> Result<()> {
                 .collect::<Vec<_>>();
 
             println!("{}", serde_json::to_string(&sorted)?);
+
+            Ok(())
+        }
+        Some(Commands::Print) => {
+            use ledger::parsing::AccountPath;
+            use ledger::parsing::Expression;
+            use ledger::parsing::Node;
+
+            let processed = get_processed()?;
+
+            let sorted = processed.nodes_iter().collect::<Vec<_>>();
+
+            fn print_expression(expression: &Expression) -> String {
+                match expression {
+                    Expression::Literal(numeric) => {
+                        format!("{}", numeric.to_decimal())
+                    }
+                    Expression::Commodity(c) => match c {
+                        (symbol, quantity, Some(price)) => format!(
+                            "{} {} @ {}",
+                            quantity,
+                            symbol.to_decimal(),
+                            price.to_decimal()
+                        ),
+                        (symbol, quantity, None) => format!("{} {}", quantity, symbol.to_decimal()),
+                    },
+                    Expression::Factor(n) => match &n {
+                        (true, i) => format!("({})", i),
+                        (false, i) => format!("-({})", i),
+                    },
+                    Expression::Calculated(_) => "".to_owned(),
+                }
+            }
+
+            let mut previous: Option<&Node> = None;
+
+            for node in sorted {
+                match node {
+                    Node::Comment(text) => {
+                        println!(";{}", text)
+                    }
+                    Node::Transaction(tx) => {
+                        match previous {
+                            Some(Node::Transaction(_)) | None => {}
+                            _ => println!(),
+                        }
+                        print!("{} ", tx.date);
+                        if tx.cleared {
+                            print!("* ")
+                        }
+                        println!("{}", tx.payee);
+                        for n in tx.notes.iter() {
+                            print!("    ");
+                            println!("; {}", n)
+                        }
+                        for p in tx.postings.iter() {
+                            print!("    ");
+                            print!(
+                                "{:100}",
+                                match &p.account {
+                                    AccountPath::Real(name) => format!("{}", name),
+                                    AccountPath::Virtual(name) => format!("[{}]", name),
+                                }
+                            );
+                            print!(
+                                "{:>20}",
+                                match &p.expression {
+                                    Some(expression) => print_expression(expression),
+                                    None => "".to_owned(),
+                                }
+                            );
+                            match &p.note {
+                                Some(note) => println!(" ; {}", note),
+                                None => println!(),
+                            }
+                        }
+                        println!("");
+                    }
+                    Node::AccountDeclaration(ap) => println!("account {}", ap.as_str()),
+                    Node::TagDeclaration(tag) => println!("tag {}", tag),
+                    Node::Include(including) => println!("!include {}", including),
+                    Node::Included(including, _) => println!("!include {}", including),
+                    Node::Generated(_) => {}
+                    Node::DefaultCommodity(symbol) => println!("D {}1000.00", symbol),
+                    Node::CommodityPrice(CommodityPrice {
+                        date,
+                        symbol,
+                        expression,
+                    }) => println!("{} {} {}", date, symbol, print_expression(expression)),
+                    Node::CommodityDeclaration(_) => println!(),
+                    Node::AutomaticTransaction(_) => println!(),
+                }
+                previous = Some(node);
+            }
 
             Ok(())
         }
@@ -936,6 +1031,49 @@ pub mod ledger {
 "
                     )?,
                     vec![Node::Include("checking.ledger".into()),]
+                );
+
+                Ok(())
+            }
+            #[test]
+            fn test_parse_transaction_below_comment() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"
+; Hello
+;
+2023/04/09 withdrawl
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+                    )?,
+                    vec![
+                        Node::Comment(" Hello".to_owned()),
+                        Node::Comment("".to_owned()),
+                        Node::Transaction(Transaction {
+                            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                            payee: "withdrawl".into(),
+                            cleared: false,
+                            mid: None,
+                            notes: Vec::new(),
+                            postings: vec![
+                                Posting {
+                                    account: AccountPath::Real("assets:cash".into()),
+                                    expression: Some(Expression::Literal(Numeric::Positive(
+                                        100, 0
+                                    ))),
+                                    note: None,
+                                },
+                                Posting {
+                                    account: AccountPath::Real("assets:checking".into()),
+                                    expression: Some(Expression::Literal(Numeric::Negative(
+                                        100, 0
+                                    ))),
+                                    note: None,
+                                },
+                            ]
+                        })
+                    ]
                 );
 
                 Ok(())
