@@ -97,11 +97,13 @@ fn main() -> Result<()> {
                     Expression::Commodity(c) => match c {
                         (quantity, symbol, Some(price)) => format!(
                             "{} {} @ {}",
-                            quantity.to_decimal(),
+                            quantity.to_text_format_raw(),
                             symbol,
-                            price.to_decimal()
+                            price.to_text_format_raw()
                         ),
-                        (quantity, symbol, None) => format!("{} {}", quantity.to_decimal(), symbol),
+                        (quantity, symbol, None) => {
+                            format!("{} {}", quantity.to_text_format_raw(), symbol)
+                        }
                     },
                     Expression::Factor(n) => match &n {
                         (true, i) => format!("(-{})", i),
@@ -326,13 +328,24 @@ pub mod ledger {
 
         impl Numeric {
             pub fn to_decimal(&self) -> BigDecimal {
+                self.to_decimal_with_scale(2)
+            }
+
+            fn to_decimal_with_scale(&self, scale: i64) -> BigDecimal {
                 match self {
                     Numeric::Negative(a, b) => {
-                        BigDecimal::new((-(*a as i64 * 100 + *b as i64)).into(), 2)
+                        BigDecimal::new((-(*a as i64 * 100 + *b as i64)).into(), scale)
                     }
                     Numeric::Positive(a, b) => {
-                        BigDecimal::new((*a as i64 * 100 + *b as i64).into(), 2)
+                        BigDecimal::new((*a as i64 * 100 + *b as i64).into(), scale)
                     }
+                }
+            }
+
+            pub fn to_text_format_raw(&self) -> String {
+                match self {
+                    Numeric::Negative(a, b) => format!("-{}.{}", a, b),
+                    Numeric::Positive(a, b) => format!("{}.{}", a, b),
                 }
             }
 
