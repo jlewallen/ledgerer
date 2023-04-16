@@ -92,26 +92,26 @@ fn main() -> Result<()> {
             fn print_expression(expression: &Expression) -> String {
                 match expression {
                     Expression::Literal(numeric) => {
-                        format!("{}", numeric.to_decimal())
+                        format!("{}", numeric.to_text_format("$"))
                     }
                     Expression::Commodity(c) => match c {
-                        (symbol, quantity, Some(price)) => format!(
+                        (quantity, symbol, Some(price)) => format!(
                             "{} {} @ {}",
-                            quantity,
-                            symbol.to_decimal(),
+                            quantity.to_decimal(),
+                            symbol,
                             price.to_decimal()
                         ),
-                        (symbol, quantity, None) => format!("{} {}", quantity, symbol.to_decimal()),
+                        (quantity, symbol, None) => format!("{} {}", quantity.to_decimal(), symbol),
                     },
                     Expression::Factor(n) => match &n {
-                        (true, i) => format!("({})", i),
-                        (false, i) => format!("-({})", i),
+                        (true, i) => format!("(-{})", i),
+                        (false, i) => format!("({})", i),
                     },
                     Expression::Calculated(_) => "".to_owned(),
                 }
             }
 
-            let mut previous: Option<&Node> = None;
+            // let mut previous: Option<&Node> = None;
 
             for node in sorted {
                 match node {
@@ -119,11 +119,7 @@ fn main() -> Result<()> {
                         println!(";{}", text)
                     }
                     Node::Transaction(tx) => {
-                        match previous {
-                            Some(Node::Transaction(_)) | None => {}
-                            _ => println!(),
-                        }
-                        print!("{} ", tx.date);
+                        print!("{} ", tx.date.format("%Y/%m/%d").to_string());
                         if tx.cleared {
                             print!("* ")
                         }
@@ -134,8 +130,61 @@ fn main() -> Result<()> {
                         }
                         for p in tx.postings.iter() {
                             print!("    ");
+                            match &p.expression {
+                                Some(Expression::Calculated(_)) | None => {
+                                    print!(
+                                        "{}",
+                                        match &p.account {
+                                            AccountPath::Real(name) => name.to_string(),
+                                            AccountPath::Virtual(name) => format!("[{}]", name),
+                                        }
+                                    );
+                                }
+                                Some(expression) => {
+                                    print!(
+                                        "{:76}",
+                                        match &p.account {
+                                            AccountPath::Real(name) => name.to_string(),
+                                            AccountPath::Virtual(name) => format!("[{}]", name),
+                                        }
+                                    );
+                                    print!("{:>20}", print_expression(expression));
+                                }
+                            }
+
+                            match &p.note {
+                                Some(note) => println!(" ; {}", note),
+                                None => println!(),
+                            }
+                        }
+                    }
+                    Node::AccountDeclaration(ap) => println!("account {}", ap.as_str()),
+                    Node::TagDeclaration(tag) => println!("tag {}", tag),
+                    Node::Include(including) => println!("!include {}", including),
+                    Node::Included(including, _) => println!("!include {}", including),
+                    Node::Generated(_) => {}
+                    Node::DefaultCommodity(symbol) => println!("D {}1000.00", symbol),
+                    Node::CommodityPrice(CommodityPrice {
+                        date,
+                        symbol,
+                        expression,
+                    }) => println!(
+                        "P {} {} {}",
+                        date.format("%Y/%m/%d").to_string(),
+                        symbol,
+                        print_expression(expression)
+                    ),
+                    Node::CommodityDeclaration(_) => println!(),
+                    Node::AutomaticTransaction(tx) => {
+                        println!("= {}", tx.condition);
+                        for n in tx.notes.iter() {
+                            print!("    ");
+                            println!("; {}", n)
+                        }
+                        for p in tx.postings.iter() {
+                            print!("    ");
                             print!(
-                                "{:100}",
+                                "{:76}",
                                 match &p.account {
                                     AccountPath::Real(name) => name.to_string(),
                                     AccountPath::Virtual(name) => format!("[{}]", name),
@@ -155,21 +204,9 @@ fn main() -> Result<()> {
                         }
                         println!();
                     }
-                    Node::AccountDeclaration(ap) => println!("account {}", ap.as_str()),
-                    Node::TagDeclaration(tag) => println!("tag {}", tag),
-                    Node::Include(including) => println!("!include {}", including),
-                    Node::Included(including, _) => println!("!include {}", including),
-                    Node::Generated(_) => {}
-                    Node::DefaultCommodity(symbol) => println!("D {}1000.00", symbol),
-                    Node::CommodityPrice(CommodityPrice {
-                        date,
-                        symbol,
-                        expression,
-                    }) => println!("{} {} {}", date, symbol, print_expression(expression)),
-                    Node::CommodityDeclaration(_) => println!(),
-                    Node::AutomaticTransaction(_) => println!(),
+                    Node::EmptyLine => println!(),
                 }
-                previous = Some(node);
+                // previous = Some(node);
             }
 
             Ok(())
@@ -207,9 +244,7 @@ fn main() -> Result<()> {
                                 true
                             }
                         })
-                        .filter_map(|p| {
-                            p.has_value().map(|value| (p.account.as_str(), value))
-                        })
+                        .filter_map(|p| p.has_value().map(|value| (p.account.as_str(), value)))
                 })
                 // This is easier than trying to get this to work with group_by
                 .fold(HashMap::new(), |mut acc, (a, v)| {
@@ -298,6 +333,13 @@ pub mod ledger {
                     Numeric::Positive(a, b) => {
                         BigDecimal::new((*a as i64 * 100 + *b as i64).into(), 2)
                     }
+                }
+            }
+
+            pub fn to_text_format(&self, symbol: &str) -> String {
+                match self {
+                    Numeric::Negative(a, b) => format!("-{}{}.{:02}", symbol, a, b),
+                    Numeric::Positive(a, b) => format!("{}{}.{:02}", symbol, a, b),
                 }
             }
         }
@@ -502,6 +544,7 @@ pub mod ledger {
             CommodityPrice(CommodityPrice),
             CommodityDeclaration(String),
             AutomaticTransaction(AutomaticTransaction),
+            EmptyLine,
         }
 
         fn unsigned_number(i: &str) -> IResult<&str, u64> {
@@ -717,16 +760,22 @@ pub mod ledger {
             })(i)
         }
 
-        fn parse_include(i: &str) -> IResult<&str, Node> {
+        fn parse_include_directive(i: &str) -> IResult<&str, Node> {
             map(
-                preceded(tuple((tag("!include"), linespace1)), file_path),
+                terminated(
+                    preceded(tuple((tag("!include"), linespace1)), file_path),
+                    opt(newline),
+                ),
                 |path| Node::Include(path.into()),
             )(i)
         }
 
         fn parse_account_declaration(i: &str) -> IResult<&str, Node> {
             map(
-                preceded(tuple((tag("account"), linespace1)), account_path),
+                terminated(
+                    preceded(preceded(tag("account"), linespace1), account_path),
+                    opt(newline),
+                ),
                 Node::AccountDeclaration,
             )(i)
         }
@@ -739,7 +788,10 @@ pub mod ledger {
 
         fn parse_tag_declaration(i: &str) -> IResult<&str, Node> {
             map(
-                preceded(tuple((tag("tag"), linespace1)), identifier),
+                terminated(
+                    preceded(preceded(tag("tag"), linespace1), identifier),
+                    opt(newline),
+                ),
                 |path| Node::TagDeclaration(path.into()),
             )(i)
         }
@@ -765,6 +817,10 @@ pub mod ledger {
             )(i)
         }
 
+        fn parse_empty_line(i: &str) -> IResult<&str, Node> {
+            map(preceded(opt(linespace1), newline), |_| Node::EmptyLine)(i)
+        }
+
         /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
         /// trailing whitespace, returning the output of `inner`.
         fn ws<'a, F: 'a, O, E: ParseError<&'a str>>(
@@ -778,11 +834,12 @@ pub mod ledger {
 
         fn parse_directive(i: &str) -> IResult<&str, Node> {
             alt((
+                parse_empty_line,
                 parse_transaction,
                 parse_comment,
                 parse_account_declaration,
                 parse_tag_declaration,
-                parse_include,
+                parse_include_directive,
                 parse_default_commodity,
                 parse_commodity_price,
                 parse_commodity_declaration,
@@ -791,8 +848,7 @@ pub mod ledger {
         }
 
         pub fn parse_str(i: &str) -> Result<Vec<Node>> {
-            let (remaining, nodes) =
-                many0(ws(parse_directive))(i).map_err(|e| anyhow!("{:?}", e))?;
+            let (remaining, nodes) = many0(parse_directive)(i).map_err(|e| anyhow!("{:?}", e))?;
 
             assert_eq!(remaining, "");
 
@@ -1026,7 +1082,7 @@ pub mod ledger {
 !include checking.ledger
 "
                     )?,
-                    vec![Node::Include("checking.ledger".into()),]
+                    vec![Node::EmptyLine, Node::Include("checking.ledger".into()),]
                 );
 
                 Ok(())
@@ -1042,6 +1098,7 @@ pub mod ledger {
     assets:cash            $100.00
     assets:checking       -$100.00
 "
+                        .trim_start()
                     )?,
                     vec![
                         Node::Comment(" Hello".to_owned()),
@@ -1076,6 +1133,39 @@ pub mod ledger {
             }
 
             #[test]
+            fn test_parse_transaction_basic_no_newline() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"2023/04/09 withdrawl
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+                    )?,
+                    vec![Node::Transaction(Transaction {
+                        date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                        payee: "withdrawl".into(),
+                        cleared: false,
+                        mid: None,
+                        notes: Vec::new(),
+                        postings: vec![
+                            Posting {
+                                account: AccountPath::Real("assets:cash".into()),
+                                expression: Some(Expression::Literal(Numeric::Positive(100, 0))),
+                                note: None,
+                            },
+                            Posting {
+                                account: AccountPath::Real("assets:checking".into()),
+                                expression: Some(Expression::Literal(Numeric::Negative(100, 0))),
+                                note: None,
+                            },
+                        ]
+                    })]
+                );
+
+                Ok(())
+            }
+
+            #[test]
             fn test_parse_transaction_basic() -> Result<()> {
                 assert_eq!(
                     parse_str(
@@ -1084,6 +1174,7 @@ pub mod ledger {
     assets:cash            $100.00
     assets:checking       -$100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1122,6 +1213,7 @@ pub mod ledger {
     assets:cash            $100.00
     assets:checking       -$100.00
 "
+                        .trim_start()
                     )?,
                     vec![
                         Node::Transaction(Transaction {
@@ -1147,6 +1239,7 @@ pub mod ledger {
                                 },
                             ]
                         }),
+                        Node::EmptyLine,
                         Node::Transaction(Transaction {
                             date: NaiveDate::from_ymd_opt(2023, 4, 10).unwrap(),
                             payee: "withdrawl 2".into(),
@@ -1185,6 +1278,7 @@ pub mod ledger {
     income                      -$100.00    
     assets:checking              $100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1221,6 +1315,7 @@ pub mod ledger {
     [assets:checking:reserved]  -$100.00
     [allocations:savings]        $100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1265,6 +1360,7 @@ pub mod ledger {
     assets:cash            $100.00
     assets:checking       $-100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1299,6 +1395,7 @@ pub mod ledger {
     assets:cash            $100.00
     assets:checking       -$100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1333,6 +1430,7 @@ pub mod ledger {
     assets:checking       -$100.00
     assets:cash
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1367,6 +1465,7 @@ pub mod ledger {
     assets:cash
     assets:checking       -$100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1402,6 +1501,7 @@ pub mod ledger {
     assets:cash            $100.00
     assets:checking       -$100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1436,6 +1536,7 @@ pub mod ledger {
     assets:cash            $100.00 ; hello-world
     assets:checking       -$100.00
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1474,14 +1575,37 @@ pub mod ledger {
             }
 
             #[test]
+            fn test_parse_account_declaration_multiple_with_empty_line() -> Result<()> {
+                assert_eq!(
+                    parse_str(
+                        r"account expenses:cash
+
+account expenses:food
+
+account [allocations:checking]
+"
+                    )?,
+                    vec![
+                        Node::AccountDeclaration(AccountPath::Real("expenses:cash".into())),
+                        Node::EmptyLine,
+                        Node::AccountDeclaration(AccountPath::Real("expenses:food".into())),
+                        Node::EmptyLine,
+                        Node::AccountDeclaration(AccountPath::Virtual(
+                            "allocations:checking".into()
+                        )),
+                    ]
+                );
+
+                Ok(())
+            }
+
+            #[test]
             fn test_parse_account_declaration_multiple() -> Result<()> {
                 assert_eq!(
                     parse_str(
-                        r"
-account expenses:cash
+                        r"account expenses:cash
 account expenses:food
-account [allocations:checking]
-"
+account [allocations:checking]"
                     )?,
                     vec![
                         Node::AccountDeclaration(AccountPath::Real("expenses:cash".into())),
@@ -1537,6 +1661,7 @@ account [allocations:checking]
     assets:fake             100.00 BS
     equity:opening
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1581,6 +1706,7 @@ account [allocations:checking]
     assets:fake             100.00 BS @ $10.00
     equity:opening
 "
+                        .trim_start()
                     )?,
                     vec![Node::Transaction(Transaction {
                         date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
@@ -1625,24 +1751,29 @@ account [allocations:checking]
     [assets:checking:reserved]                           (1)
 "
                     )?,
-                    vec![Node::AutomaticTransaction(AutomaticTransaction {
-                        condition: "assets:savings:ktc".into(),
-                        notes: vec![],
-                        postings: vec![
-                            Posting {
-                                account: AccountPath::Virtual(
-                                    "allocations:checking:savings:main".into()
-                                ),
-                                expression: Some(Expression::Factor((true, 1))),
-                                note: None,
-                            },
-                            Posting {
-                                account: AccountPath::Virtual("assets:checking:reserved".into()),
-                                expression: Some(Expression::Factor((false, 1))),
-                                note: None,
-                            },
-                        ]
-                    }),]
+                    vec![
+                        Node::EmptyLine,
+                        Node::AutomaticTransaction(AutomaticTransaction {
+                            condition: "assets:savings:ktc".into(),
+                            notes: vec![],
+                            postings: vec![
+                                Posting {
+                                    account: AccountPath::Virtual(
+                                        "allocations:checking:savings:main".into()
+                                    ),
+                                    expression: Some(Expression::Factor((true, 1))),
+                                    note: None,
+                                },
+                                Posting {
+                                    account: AccountPath::Virtual(
+                                        "assets:checking:reserved".into()
+                                    ),
+                                    expression: Some(Expression::Factor((false, 1))),
+                                    note: None,
+                                },
+                            ]
+                        }),
+                    ]
                 );
 
                 Ok(())
@@ -1658,6 +1789,7 @@ account [allocations:checking]
     [allocations:checking:savings:main]                 (-1)
     [assets:checking:reserved]                           (1)
 "
+                        .trim_start()
                     )?,
                     vec![Node::AutomaticTransaction(AutomaticTransaction {
                         condition: "assets:savings:ktc".into(),
