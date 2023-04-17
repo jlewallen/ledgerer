@@ -87,7 +87,7 @@ fn main() -> Result<()> {
 
             let processed = get_processed()?;
 
-            let sorted = processed.nodes_iter().collect::<Vec<_>>();
+            let sorted = processed.sorted_nodes_iter().collect::<Vec<_>>();
 
             fn print_expression(expression: &Expression) -> String {
                 match expression {
@@ -1024,6 +1024,30 @@ pub mod ledger {
 
             pub fn nodes_iter(&self) -> impl Iterator<Item = &Node> {
                 self.nodes.iter()
+            }
+
+            pub fn sorted_nodes_iter(&self) -> impl Iterator<Item = &Node> {
+                let mapped = self.nodes_iter().scan((NaiveDate::MIN, 0), |acc, node| {
+                    let node_date: Option<NaiveDate> = match node {
+                        Node::Transaction(tx) => Some(tx.date),
+                        Node::CommodityPrice(p) => Some(p.date),
+                        _ => None,
+                    };
+
+                    *acc = node_date.map_or((acc.0, acc.1 + 1), |d| {
+                        if d == acc.0 {
+                            (acc.0, acc.1 + 1)
+                        } else {
+                            (d, acc.1 + 1)
+                        }
+                    });
+
+                    Some((acc.0, acc.1, node))
+                });
+
+                let mut sortable: Vec<_> = mapped.collect();
+                sortable.sort_unstable_by_key(|i| (i.0, i.1));
+                sortable.into_iter().map(|i| i.2)
             }
         }
 
