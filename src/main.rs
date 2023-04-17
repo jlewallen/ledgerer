@@ -99,7 +99,7 @@ fn main() -> Result<()> {
                             "{} {} @ {}",
                             quantity.to_text_format_raw(),
                             symbol,
-                            price.to_text_format_raw()
+                            price.to_text_format("$")
                         ),
                         (quantity, symbol, None) => {
                             format!("{} {}", quantity.to_text_format_raw(), symbol)
