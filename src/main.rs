@@ -113,8 +113,6 @@ fn main() -> Result<()> {
                 }
             }
 
-            // let mut previous: Option<&Node> = None;
-
             for node in sorted {
                 match node {
                     Node::Comment(text) => {
@@ -208,7 +206,6 @@ fn main() -> Result<()> {
                     }
                     Node::EmptyLine => println!(),
                 }
-                // previous = Some(node);
             }
 
             Ok(())
@@ -302,7 +299,6 @@ pub mod ledger {
             sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
             IResult,
         };
-
         use serde::{ser::SerializeStruct, Serialize};
         use tracing::*;
 
@@ -734,17 +730,15 @@ pub mod ledger {
 
         fn parse_posting(i: &str) -> IResult<&str, Posting> {
             map(
-                pair(
+                tuple((
                     account_path,
-                    pair(
-                        opt(preceded(linespace1, expression)),
-                        opt(preceded(
-                            tuple((linespace1, tag(";"), linespace1)),
-                            parse_note,
-                        )),
-                    ),
-                ),
-                |(account, (expression, note))| Posting {
+                    opt(preceded(linespace1, expression)),
+                    opt(preceded(
+                        tuple((linespace1, tag(";"), linespace1)),
+                        parse_note,
+                    )),
+                )),
+                |(account, expression, note)| Posting {
                     account,
                     expression,
                     note: note.map(|f| f.into()),
@@ -754,10 +748,9 @@ pub mod ledger {
 
         fn parse_default_commodity(i: &str) -> IResult<&str, Node> {
             map(
-                separated_pair(
-                    tag("D"),
-                    linespace1,
-                    pair(
+                preceded(
+                    pair(tag("D"), linespace1),
+                    preceded(
                         tag("$"),
                         separated_pair(unsigned_number, tag("."), unsigned_number),
                     ),
