@@ -11,6 +11,7 @@ use model::LedgerFile;
 
 mod balances;
 mod json;
+mod lots;
 mod print;
 
 #[derive(Parser)]
@@ -27,6 +28,7 @@ enum Commands {
     Json(json::Command),
     Print(print::Command),
     Balances(balances::Command),
+    Lots(lots::Command),
 }
 
 fn main() -> Result<()> {
@@ -55,6 +57,7 @@ fn main() -> Result<()> {
         Some(Commands::Json(cmd)) => json::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Print(cmd)) => print::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Balances(cmd)) => balances::execute_command(&load_ledger_file()?, cmd),
+        Some(Commands::Lots(cmd)) => lots::execute_command(&load_ledger_file()?, cmd),
         _ => Ok(()),
     }
 }

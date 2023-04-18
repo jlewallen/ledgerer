@@ -12,6 +12,7 @@ where
     W: Write,
 {
     match node {
+        Node::EmptyLine => writeln!(w),
         Node::Comment(text) => {
             writeln!(w, ";{}", text)
         }
@@ -46,17 +47,6 @@ where
 
             Ok(())
         }
-        Node::AccountDeclaration(ap) => writeln!(w, "account {}", ap.as_str()),
-        Node::TagDeclaration(tag) => writeln!(w, "tag {}", tag),
-        Node::Include(including) => writeln!(w, "!include {}", including),
-        Node::Included(including, _) => writeln!(w, "!include {}", including),
-        Node::DefaultCommodity(symbol) => writeln!(w, "D {}1000.00", symbol),
-        Node::CommodityPrice(CommodityPrice {
-            date,
-            symbol,
-            expression,
-        }) => writeln!(w, "P {} {} {}", date.format("%Y/%m/%d"), symbol, expression),
-        Node::CommodityDeclaration(symbol) => writeln!(w, "commodity {}", symbol),
         Node::AutomaticTransaction(tx) => {
             writeln!(w, "= {}", tx.condition)?;
             for n in tx.notes.iter() {
@@ -80,7 +70,17 @@ where
 
             Ok(())
         }
-        Node::EmptyLine => writeln!(w),
+        Node::CommodityPrice(CommodityPrice {
+            date,
+            symbol,
+            expression,
+        }) => writeln!(w, "P {} {} {}", date.format("%Y/%m/%d"), symbol, expression),
+        Node::AccountDeclaration(ap) => writeln!(w, "account {}", ap.as_str()),
+        Node::TagDeclaration(tag) => writeln!(w, "tag {}", tag),
+        Node::Include(including) => writeln!(w, "!include {}", including),
+        Node::Included(including, _) => writeln!(w, "!include {}", including),
+        Node::DefaultCommodity(symbol) => writeln!(w, "D {}1000.00", symbol),
+        Node::CommodityDeclaration(symbol) => writeln!(w, "commodity {}", symbol),
         _ => Ok(()),
     }
 }
