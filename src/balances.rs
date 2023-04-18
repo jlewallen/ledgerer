@@ -23,7 +23,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         .unwrap();
     let sorted = file
         .iter_transactions_in_order()
-        .filter(|t| t.is_simple() && (!cmd.cleared || t.cleared))
+        .filter(|t| !cmd.cleared || t.cleared)
         .collect::<Vec<_>>();
 
     let past_only = sorted
@@ -58,7 +58,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             let value = accounts.get(key).unwrap();
             if !value.is_zero() {
                 // println!("{:width$} {:>10}", key, value, width = max_key_len);
-                println!("{:>20} {}", value, key);
+                println!("{:>20} {}", value.with_scale(2), key);
             }
         }
     }

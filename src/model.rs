@@ -222,6 +222,10 @@ impl Posting {
         match &self.expression {
             Some(Expression::Literal(numeric)) => Some(numeric.to_decimal()),
             Some(Expression::Calculated(value)) => Some(value.clone()),
+            Some(Expression::Commodity(c)) => match &c.price {
+                Some(price) => Some(c.quantity.to_decimal() * price.to_decimal()),
+                None => None,
+            },
             _ => None,
         }
     }
@@ -232,7 +236,9 @@ impl Serialize for Posting {
     where
         S: serde::Serializer,
     {
-        let value = self.has_value().map(|value| format!("{}", value));
+        let value = self
+            .has_value()
+            .map(|value| format!("{}", value.with_scale(2)));
         let mut state = serializer.serialize_struct("Posting", 3)?;
         state.serialize_field("account", self.account.as_str())?;
         state.serialize_field("value", &value)?;
