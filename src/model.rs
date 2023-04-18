@@ -27,6 +27,15 @@ impl AccountPath {
     }
 }
 
+impl std::fmt::Display for AccountPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AccountPath::Real(name) => f.pad(name),
+            AccountPath::Virtual(name) => f.pad(&format!("[{}]", name)),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Numeric {
     Negative(String, Option<String>),
@@ -59,10 +68,6 @@ impl Numeric {
             Numeric::Positive(a, None) => format!("{}{}", symbol, a),
         }
     }
-
-    pub fn to_text_format_raw(&self) -> String {
-        self.to_text_format("")
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -71,6 +76,30 @@ pub enum Expression {
     Commodity((Numeric, String, Option<Numeric>)),
     Factor((bool, u64)),
     Calculated(BigDecimal),
+}
+
+impl std::fmt::Display for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expression::Literal(numeric) => f.pad(&format!("{}", numeric.to_text_format("$"))),
+            Expression::Commodity(c) => match c {
+                (quantity, symbol, Some(price)) => f.pad(&format!(
+                    "{} {} @ {}",
+                    quantity.to_text_format(""),
+                    symbol,
+                    price.to_text_format("$")
+                )),
+                (quantity, symbol, None) => {
+                    f.pad(&format!("{} {}", quantity.to_text_format(""), symbol))
+                }
+            },
+            Expression::Factor(n) => match &n {
+                (true, i) => f.pad(&format!("(-{})", i)),
+                (false, i) => f.pad(&format!("({})", i)),
+            },
+            Expression::Calculated(_) => f.pad(""),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

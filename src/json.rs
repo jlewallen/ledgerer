@@ -11,7 +11,7 @@ pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> 
         .filter(|t| t.is_simple())
         .collect::<Vec<_>>();
 
-    println!("{}", serde_json::to_string(&sorted)?);
+    serde_json::to_writer(std::io::stdout(), &sorted)?;
 
     Ok(())
 }
