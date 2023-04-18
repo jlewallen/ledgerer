@@ -85,6 +85,20 @@ pub enum Expression {
     Calculated(BigDecimal),
 }
 
+impl Expression {
+    pub fn to_decimal(&self) -> Option<BigDecimal> {
+        match self {
+            Expression::Literal(numeric) => Some(numeric.to_decimal()),
+            Expression::Calculated(value) => Some(value.clone()),
+            Expression::Commodity(c) => match &c.price {
+                Some(price) => Some(c.quantity.to_decimal() * price.to_decimal()),
+                None => None,
+            },
+            Expression::Factor(_) => None,
+        }
+    }
+}
+
 impl std::fmt::Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -219,15 +233,7 @@ impl Posting {
     }
 
     pub fn has_value(&self) -> Option<BigDecimal> {
-        match &self.expression {
-            Some(Expression::Literal(numeric)) => Some(numeric.to_decimal()),
-            Some(Expression::Calculated(value)) => Some(value.clone()),
-            Some(Expression::Commodity(c)) => match &c.price {
-                Some(price) => Some(c.quantity.to_decimal() * price.to_decimal()),
-                None => None,
-            },
-            _ => None,
-        }
+        self.expression.as_ref().map_or(None, |e| e.to_decimal())
     }
 }
 
