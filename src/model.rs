@@ -71,9 +71,16 @@ impl Numeric {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct CommodityExpression {
+    pub quantity: Numeric,
+    pub symbol: String,
+    pub price: Option<Numeric>,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Expression {
     Literal(Numeric),
-    Commodity((Numeric, String, Option<Numeric>)),
+    Commodity(CommodityExpression),
     Factor((bool, u64)),
     Calculated(BigDecimal),
 }
@@ -83,15 +90,21 @@ impl std::fmt::Display for Expression {
         match self {
             Expression::Literal(numeric) => f.pad(&format!("{}", numeric.to_text_format("$"))),
             Expression::Commodity(c) => match c {
-                (quantity, symbol, Some(price)) => f.pad(&format!(
+                CommodityExpression {
+                    quantity,
+                    symbol,
+                    price: Some(price),
+                } => f.pad(&format!(
                     "{} {} @ {}",
                     quantity.to_text_format(""),
                     symbol,
                     price.to_text_format("$")
                 )),
-                (quantity, symbol, None) => {
-                    f.pad(&format!("{} {}", quantity.to_text_format(""), symbol))
-                }
+                CommodityExpression {
+                    quantity,
+                    symbol,
+                    price: None,
+                } => f.pad(&format!("{} {}", quantity.to_text_format(""), symbol)),
             },
             Expression::Factor(n) => match &n {
                 (true, i) => f.pad(&format!("(-{})", i)),

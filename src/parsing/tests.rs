@@ -719,11 +719,11 @@ fn test_parse_transaction_with_mixed_commodities() -> Result<()> {
                 },
                 Posting {
                     account: AccountPath::Real("assets:fake".into()),
-                    expression: Some(Expression::Commodity((
-                        Numeric::Positive("100".into(), Some("00".into())),
-                        "BS".into(),
-                        None,
-                    ))),
+                    expression: Some(Expression::Commodity(CommodityExpression {
+                        quantity: Numeric::Positive("100".into(), Some("00".into())),
+                        symbol: "BS".into(),
+                        price: None,
+                    })),
                     note: None,
                 },
                 Posting {
@@ -767,11 +767,11 @@ fn test_parse_transaction_with_priced_commodity() -> Result<()> {
                 },
                 Posting {
                     account: AccountPath::Real("assets:fake".into()),
-                    expression: Some(Expression::Commodity((
-                        Numeric::Positive("100".into(), Some("00".into())),
-                        "BS".into(),
-                        Some(Numeric::Positive("10".into(), Some("00".into())))
-                    ))),
+                    expression: Some(Expression::Commodity(CommodityExpression {
+                        quantity: Numeric::Positive("100".into(), Some("00".into())),
+                        symbol: "BS".into(),
+                        price: Some(Numeric::Positive("10".into(), Some("00".into())))
+                    })),
                     note: None,
                 },
                 Posting {

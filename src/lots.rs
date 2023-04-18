@@ -3,7 +3,7 @@ use chrono::NaiveDate;
 use clap::Args;
 use std::io::Write;
 
-use crate::model::LedgerFile;
+use crate::model::{CommodityExpression, LedgerFile};
 
 #[derive(Debug, Args)]
 pub struct Command {}
@@ -22,7 +22,11 @@ pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> 
         .filter(|tx| !tx.is_simple())
         .flat_map(|tx| {
             tx.postings.iter().filter_map(|p| match &p.expression {
-                Some(crate::model::Expression::Commodity((quantity, symbol, price))) => Some(Lot {
+                Some(crate::model::Expression::Commodity(CommodityExpression {
+                    quantity,
+                    symbol,
+                    price,
+                })) => Some(Lot {
                     date: tx.date,
                     symbol: symbol.to_owned(),
                     quantity: quantity.to_decimal(),

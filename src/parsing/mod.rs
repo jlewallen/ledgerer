@@ -153,7 +153,13 @@ fn basic_commodity(i: &str) -> IResult<&str, Expression> {
                 numeric_literal,
             )),
         )),
-        |(quantity, symbol, price)| Expression::Commodity((quantity, symbol.into(), price)),
+        |(quantity, symbol, price)| {
+            Expression::Commodity(CommodityExpression {
+                quantity,
+                symbol: symbol.into(),
+                price,
+            })
+        },
     )(i)
 }
 
