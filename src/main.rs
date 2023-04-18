@@ -11,6 +11,7 @@ use model::LedgerFile;
 
 mod balances;
 mod json;
+mod lint;
 mod lots;
 mod print;
 
@@ -29,6 +30,7 @@ enum Commands {
     Print(print::Command),
     Balances(balances::Command),
     Lots(lots::Command),
+    Lint(lint::Command),
 }
 
 fn main() -> Result<()> {
@@ -58,6 +60,7 @@ fn main() -> Result<()> {
         Some(Commands::Print(cmd)) => print::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Balances(cmd)) => balances::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Lots(cmd)) => lots::execute_command(&load_ledger_file()?, cmd),
+        Some(Commands::Lint(cmd)) => lint::execute_command(&load_ledger_file()?, cmd),
         _ => Ok(()),
     }
 }
