@@ -32,6 +32,20 @@ fn test_parse_price() -> Result<()> {
 }
 
 #[test]
+fn test_parse_price_with_asterisks() -> Result<()> {
+    assert_eq!(
+        parse_str(r"P 2021/1/29 BS** $1000.00")?,
+        vec![Node::CommodityPrice(CommodityPrice {
+            date: NaiveDate::from_ymd_opt(2021, 1, 29).expect("inline date error"),
+            symbol: "BS**".into(),
+            expression: Expression::Literal(Numeric::Positive("1000".into(), Some("00".into())))
+        })]
+    );
+
+    Ok(())
+}
+
+#[test]
 fn test_parse_include() -> Result<()> {
     assert_eq!(
         parse_str(r"!include checking.ledger")?,

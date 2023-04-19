@@ -318,7 +318,7 @@ pub fn parse_str(i: &str) -> Result<Vec<Node>> {
 }
 
 fn symbol(i: &str) -> IResult<&str, &str> {
-    recognize(many1(alpha1))(i)
+    recognize(tuple((many1(alpha1), many0(tag("*")))))(i)
 }
 
 fn unparsed_unsigned_number(i: &str) -> IResult<&str, &str> {
