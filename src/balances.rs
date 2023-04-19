@@ -56,6 +56,9 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             acc
         });
 
+    let declared = file.declared_accounts();
+    let accounts = bubble_balances_upward(&accounts, &declared);
+
     if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
         for key in accounts.keys().sorted() {
             let value = accounts.get(key).unwrap();
@@ -69,6 +72,103 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn bubble_balances_upward(
+    from: &HashMap<&str, Balances>,
+    declared: &HashMap<String, AccountPath>,
+) -> HashMap<String, Balances> {
+    let mut into = HashMap::new();
+    for (account, balances) in from.iter() {
+        for parent in get_parents_and_self(account) {
+            if declared.contains_key(parent.as_str()) {
+                if !into.contains_key(parent.as_str()) {
+                    into.insert(parent, balances.clone());
+                } else {
+                    *into.get_mut(parent.as_str()).unwrap() += balances.clone();
+                }
+            }
+        }
+    }
+    into
+}
+
+fn get_parents_and_self(p: &str) -> Vec<String> {
+    if p.len() > 0 {
+        std::iter::once(p.to_owned())
+            .chain(get_parents(p))
+            .collect()
+    } else {
+        vec![]
+    }
+}
+
+fn get_parents(p: &str) -> Vec<String> {
+    let mut parents = Vec::new();
+    for (i, c) in p.chars().enumerate() {
+        if c == ':' && i < p.len() {
+            parents.push(p[0..i].to_owned())
+        }
+    }
+    parents.reverse();
+    parents
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_parents_and_self_empty() {
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(get_parents_and_self(""), empty);
+    }
+
+    #[test]
+    fn test_get_parents_and_self_single() {
+        assert_eq!(get_parents_and_self("single"), vec!["single"]);
+    }
+
+    #[test]
+    fn test_get_parents_and_self_two() {
+        assert_eq!(
+            get_parents_and_self("first:second"),
+            vec!["first:second", "first"]
+        );
+    }
+
+    #[test]
+    fn test_get_parents_and_self_three() {
+        assert_eq!(
+            get_parents_and_self("first:second:third"),
+            vec!["first:second:third", "first:second", "first"]
+        );
+    }
+
+    #[test]
+    fn test_get_parents_empty() {
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(get_parents(""), empty);
+    }
+
+    #[test]
+    fn test_get_parents_single() {
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(get_parents("single"), empty);
+    }
+
+    #[test]
+    fn test_get_parents_two() {
+        assert_eq!(get_parents("first:second"), vec!["first"]);
+    }
+
+    #[test]
+    fn test_get_parents_three() {
+        assert_eq!(
+            get_parents("first:second:third"),
+            vec!["first:second", "first"]
+        );
+    }
 }
 
 struct SymbolDecimal<'a> {

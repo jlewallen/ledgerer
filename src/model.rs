@@ -387,6 +387,17 @@ impl LedgerFile {
         }
     }
 
+    pub fn declared_accounts(&self) -> HashMap<String, AccountPath> {
+        let mut accounts = HashMap::new();
+        for node in self.recursive_iter() {
+            match node {
+                Node::AccountDeclaration(ap) => accounts.insert(ap.as_str().to_owned(), ap.clone()),
+                _ => None,
+            };
+        }
+        accounts
+    }
+
     pub fn apply_automatic_transactions(self) -> Result<LedgerFile> {
         let _span = span!(Level::INFO, "auto-txs").entered();
         let started = Instant::now();
@@ -541,7 +552,7 @@ fn include_glob(path: &str) -> Result<Vec<Node>> {
     Ok(nodes)
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Balances {
     by_symbol: HashMap<String, BigDecimal>,
 }
