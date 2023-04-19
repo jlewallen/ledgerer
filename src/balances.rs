@@ -30,7 +30,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         .iter()
         .filter(|tx| naive_to_pacific(tx.date).unwrap() < Utc::now());
 
-    let accounts: HashMap<&str, BigDecimal> = past_only
+    let accounts: HashMap<&str, Balances> = past_only
         .flat_map(|tx| {
             tx.postings
                 .iter()
@@ -41,7 +41,10 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                         true
                     }
                 })
-                .filter_map(|p| p.has_value().map(|value| (p.account.as_str(), value)))
+                .filter_map(|p| {
+                    p.into_balances()
+                        .map_or(None, |b| Some((p.account.as_str(), b)))
+                })
         })
         // This is easier than trying to get this to work with group_by
         .fold(HashMap::new(), |mut acc, (a, v)| {
@@ -56,14 +59,47 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
         for key in accounts.keys().sorted() {
             let value = accounts.get(key).unwrap();
-            if !value.is_zero() {
-                // println!("{:width$} {:>10}", key, value, width = max_key_len);
-                println!("{:>20} {}", value.with_scale(2), key);
+            for (symbol, value) in value.iter() {
+                let pretty = SymbolDecimal::new(symbol, value);
+                if !pretty.is_zero() {
+                    println!("{:>20} {}", pretty, key);
+                }
             }
         }
     }
 
     Ok(())
+}
+
+struct SymbolDecimal<'a> {
+    symbol: &'a str,
+    decimal: &'a BigDecimal,
+}
+
+impl<'a> SymbolDecimal<'a> {
+    pub fn new(symbol: &'a str, decimal: &'a BigDecimal) -> Self {
+        Self { symbol, decimal }
+    }
+
+    pub fn with_scale(&self) -> BigDecimal {
+        match self.symbol {
+            "$" => self.decimal.with_scale(2),
+            _ => self.decimal.clone(),
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.with_scale().is_zero()
+    }
+}
+
+impl<'a> std::fmt::Display for SymbolDecimal<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.symbol {
+            "$" => f.pad(&format!("${}", self.decimal.with_scale(2))),
+            _ => f.pad(&format!("{} {}", self.symbol, self.decimal)),
+        }
+    }
 }
 
 fn naive_to_pacific(date: NaiveDate) -> Result<DateTime<chrono_tz::Tz>> {

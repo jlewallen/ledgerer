@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use serde::{ser::SerializeStruct, Serialize};
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     str::FromStr,
     sync::atomic::AtomicU64,
@@ -94,6 +95,15 @@ impl Expression {
                 Some(price) => Some(c.quantity.to_decimal() * price.to_decimal()),
                 None => None,
             },
+            Expression::Factor(_) => None,
+        }
+    }
+
+    pub fn into_balances(&self) -> Option<Balances> {
+        match self {
+            Expression::Literal(numeric) => Some(Balances::new("$".into(), numeric.to_decimal())), // TODO This could be better.
+            Expression::Calculated(decimal) => Some(Balances::new("$".into(), decimal.clone())),
+            Expression::Commodity(c) => Some(Balances::new(&c.symbol, c.quantity.to_decimal())),
             Expression::Factor(_) => None,
         }
     }
@@ -234,6 +244,10 @@ impl Posting {
 
     pub fn has_value(&self) -> Option<BigDecimal> {
         self.expression.as_ref().map_or(None, |e| e.to_decimal())
+    }
+
+    pub fn into_balances(&self) -> Option<Balances> {
+        self.expression.as_ref().map_or(None, |e| e.into_balances())
     }
 }
 
@@ -525,4 +539,33 @@ fn include_glob(path: &str) -> Result<Vec<Node>> {
         .collect();
 
     Ok(nodes)
+}
+
+#[derive(Debug, Default)]
+pub struct Balances {
+    by_symbol: HashMap<String, BigDecimal>,
+}
+
+impl Balances {
+    pub fn new(symbol: &str, value: BigDecimal) -> Self {
+        Self {
+            by_symbol: vec![(symbol.to_owned(), value)].into_iter().collect(),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &BigDecimal)> {
+        self.by_symbol.iter()
+    }
+}
+
+impl std::ops::AddAssign<Balances> for Balances {
+    fn add_assign(&mut self, rhs: Balances) {
+        for (key, value) in rhs.by_symbol.iter() {
+            if self.by_symbol.contains_key(key) {
+                *self.by_symbol.get_mut(key).unwrap() += value;
+            } else {
+                self.by_symbol.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
 }
