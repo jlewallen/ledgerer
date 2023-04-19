@@ -75,10 +75,11 @@ where
             symbol,
             expression,
         }) => writeln!(w, "P {} {} {}", date.format("%Y/%m/%d"), symbol, expression),
+        Node::Include(including) | Node::Included(including, _) => {
+            writeln!(w, "!include {}", including)
+        }
         Node::AccountDeclaration(ap) => writeln!(w, "account {}", ap.as_str()),
         Node::TagDeclaration(tag) => writeln!(w, "tag {}", tag),
-        Node::Include(including) => writeln!(w, "!include {}", including),
-        Node::Included(including, _) => writeln!(w, "!include {}", including),
         Node::DefaultCommodity(symbol) => writeln!(w, "D {}1000.00", symbol),
         Node::CommodityDeclaration(symbol) => writeln!(w, "commodity {}", symbol),
         _ => Ok(()),
