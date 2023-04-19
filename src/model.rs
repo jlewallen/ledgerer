@@ -296,6 +296,28 @@ impl AutomaticTransaction {
     }
 }
 
+pub trait HasNotes {
+    fn into_notes(&self) -> Vec<&String>;
+}
+
+impl HasNotes for Transaction {
+    fn into_notes(&self) -> Vec<&String> {
+        self.notes
+            .iter()
+            .chain(self.postings.iter().filter_map(|p| p.note.as_ref()))
+            .collect_vec()
+    }
+}
+
+impl HasNotes for AutomaticTransaction {
+    fn into_notes(&self) -> Vec<&String> {
+        self.notes
+            .iter()
+            .chain(self.postings.iter().filter_map(|p| p.note.as_ref()))
+            .collect_vec()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct CommodityPrice {
     pub date: NaiveDate,

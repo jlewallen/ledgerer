@@ -4,7 +4,7 @@ use clap::Args;
 use itertools::Itertools;
 use regex::Regex;
 
-use crate::model::{LedgerFile, Node};
+use crate::model::{HasNotes, LedgerFile, Node, Posting};
 
 #[derive(Debug, Args)]
 pub struct Command {}
@@ -18,6 +18,18 @@ struct RequireAccountDeclarationsCheck {
     accounts: HashMap<String, bool>,
 }
 
+impl RequireAccountDeclarationsCheck {
+    fn check_postings(&mut self, postings: &[Posting]) -> anyhow::Result<()> {
+        for ap in postings.iter().map(|p| &p.account) {
+            if !self.accounts.contains_key(ap.as_str()) {
+                return Err(anyhow::anyhow!("Unknown Account: {}", ap.as_str()));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl LintCheck for RequireAccountDeclarationsCheck {
     fn check_node(&mut self, node: &Node) -> anyhow::Result<()> {
         match node {
@@ -26,24 +38,8 @@ impl LintCheck for RequireAccountDeclarationsCheck {
 
                 Ok(())
             }
-            Node::Transaction(tx) => {
-                for ap in tx.postings.iter().map(|p| &p.account) {
-                    if !self.accounts.contains_key(ap.as_str()) {
-                        return Err(anyhow::anyhow!("Unknown Account: {}", ap.as_str()));
-                    }
-                }
-
-                Ok(())
-            }
-            Node::AutomaticTransaction(tx) => {
-                for ap in tx.postings.iter().map(|p| &p.account) {
-                    if !self.accounts.contains_key(ap.as_str()) {
-                        return Err(anyhow::anyhow!("Unknown Account: {}", ap.as_str()));
-                    }
-                }
-
-                Ok(())
-            }
+            Node::Transaction(tx) => self.check_postings(&tx.postings),
+            Node::AutomaticTransaction(tx) => self.check_postings(&tx.postings),
             _ => Ok(()),
         }
     }
@@ -68,6 +64,52 @@ fn find_note_tags(note: &str) -> Vec<String> {
         .map(|m| m.as_str().to_owned())
         .unique()
         .collect()
+}
+
+impl RequireTagDeclarationCheck {
+    fn check_notes<'a, I>(&self, iter: I) -> anyhow::Result<()>
+    where
+        I: Iterator<Item = &'a String>, // How can we make this &str?
+    {
+        for note in iter {
+            for tag in find_note_tags(note) {
+                if !self.tags.contains_key(tag.as_str()) {
+                    return Err(anyhow::anyhow!("Unknown Tag: {}", tag));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl LintCheck for RequireTagDeclarationCheck {
+    fn check_node(&mut self, node: &Node) -> anyhow::Result<()> {
+        match node {
+            Node::TagDeclaration(name) => {
+                self.tags.insert(name.as_str().to_owned(), true);
+
+                Ok(())
+            }
+            Node::Transaction(tx) => Ok(self.check_notes(tx.into_notes().into_iter())?),
+            Node::AutomaticTransaction(tx) => Ok(self.check_notes(tx.into_notes().into_iter())?),
+            _ => Ok(()),
+        }
+    }
+}
+
+pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> {
+    let mut checks: Vec<Box<dyn LintCheck>> = Vec::new();
+    checks.push(Box::new(RequireAccountDeclarationsCheck::default()));
+    checks.push(Box::new(RequireTagDeclarationCheck::default()));
+
+    for node in file.recursive_iter() {
+        for check in checks.iter_mut() {
+            check.check_node(node)?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -106,63 +148,4 @@ mod tests {
             vec!["something".to_owned()]
         );
     }
-}
-
-impl RequireTagDeclarationCheck {
-    fn check_notes<'a, I>(&self, iter: I) -> anyhow::Result<()>
-    where
-        I: Iterator<Item = &'a String>, // How can we make this &str?
-    {
-        for note in iter {
-            for tag in find_note_tags(note) {
-                if !self.tags.contains_key(tag.as_str()) {
-                    return Err(anyhow::anyhow!("Unknown Tag: {}", tag));
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl LintCheck for RequireTagDeclarationCheck {
-    fn check_node(&mut self, node: &Node) -> anyhow::Result<()> {
-        match node {
-            Node::TagDeclaration(name) => {
-                self.tags.insert(name.as_str().to_owned(), true);
-
-                Ok(())
-            }
-            // TODO It would be nice if we could hide this behind a HasPostings/iter_postings() trait?
-            Node::Transaction(tx) => {
-                let notes = tx
-                    .notes
-                    .iter()
-                    .chain(tx.postings.iter().filter_map(|p| p.note.as_ref()));
-                Ok(self.check_notes(notes)?)
-            }
-            Node::AutomaticTransaction(tx) => {
-                let notes = tx
-                    .notes
-                    .iter()
-                    .chain(tx.postings.iter().filter_map(|p| p.note.as_ref()));
-                Ok(self.check_notes(notes)?)
-            }
-            _ => Ok(()),
-        }
-    }
-}
-
-pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> {
-    let mut checks: Vec<Box<dyn LintCheck>> = Vec::new();
-    checks.push(Box::new(RequireAccountDeclarationsCheck::default()));
-    checks.push(Box::new(RequireTagDeclarationCheck::default()));
-
-    for node in file.recursive_iter() {
-        for check in checks.iter_mut() {
-            check.check_node(node)?;
-        }
-    }
-
-    Ok(())
 }
