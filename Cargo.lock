@@ -394,6 +394,7 @@ dependencies = [
  "clap",
  "glob",
  "itertools",
+ "lazy_static",
  "nom",
  "regex",
  "serde",
