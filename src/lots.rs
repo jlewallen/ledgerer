@@ -19,7 +19,6 @@ pub struct Lot {
 pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> {
     let mut lots: Vec<Lot> = file
         .iter_transactions()
-        .filter(|tx| !tx.is_simple())
         .flat_map(|tx| {
             tx.postings.iter().filter_map(|p| match &p.expression {
                 Some(crate::model::Expression::Commodity(CommodityExpression {
