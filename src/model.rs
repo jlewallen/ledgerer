@@ -207,7 +207,24 @@ impl Transaction {
                 postings,
             })
         } else {
-            Ok(self)
+            let total: BigDecimal = self
+                .postings
+                .iter()
+                .map(|p| p.has_value().unwrap_or(BigDecimal::zero()))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .sum();
+
+            if !total.is_zero() {
+                Err(anyhow!(
+                    "Unbalanced transaction: {} '{}' ~ {}!",
+                    &self.date,
+                    self.payee,
+                    total
+                ))
+            } else {
+                Ok(self)
+            }
         }
     }
 
