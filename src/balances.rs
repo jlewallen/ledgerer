@@ -10,6 +10,8 @@ pub struct Command {
     pattern: Option<String>,
     #[arg(short, long)]
     cleared: bool,
+    #[arg(short, long)]
+    actual: bool,
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
@@ -30,7 +32,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         .iter()
         .filter(|tx| naive_to_pacific(tx.date).unwrap() < Utc::now());
 
-    let accounts: HashMap<&str, Balances> = past_only
+    let accounts: HashMap<String, Balances> = past_only
         .flat_map(|tx| {
             tx.postings
                 .iter()
@@ -49,7 +51,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         // This is easier than trying to get this to work with group_by
         .fold(HashMap::new(), |mut acc, (a, v)| {
             if !acc.contains_key(a) {
-                acc.insert(a, v);
+                acc.insert(a.to_owned(), v);
             } else {
                 *acc.get_mut(a).unwrap() += v
             }
@@ -57,7 +59,11 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         });
 
     let declared = file.declared_accounts();
-    let accounts = bubble_balances_upward(&accounts, &declared);
+    let accounts = if cmd.actual {
+        accounts.clone()
+    } else {
+        bubble_balances_upward(&accounts, &declared)
+    };
 
     if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
         for key in accounts.keys().sorted() {
@@ -75,7 +81,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
 }
 
 fn bubble_balances_upward(
-    from: &HashMap<&str, Balances>,
+    from: &HashMap<String, Balances>,
     declared: &HashMap<String, AccountPath>,
 ) -> HashMap<String, Balances> {
     let mut into = HashMap::new();
