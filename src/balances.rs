@@ -1,20 +1,24 @@
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use clap::Args;
 use regex::Regex;
+use serde::{ser::SerializeStruct, Serialize};
 use std::collections::HashMap;
 
 use crate::model::*;
 
 #[derive(Debug, Args)]
 pub struct Command {
-    pattern: Option<String>,
+    pub pattern: Option<String>,
     #[arg(short, long)]
-    cleared: bool,
+    pub cleared: bool,
     #[arg(short, long)]
-    actual: bool,
+    pub actual: bool,
 }
 
-pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
+pub fn calculate_balances(
+    file: &LedgerFile,
+    cmd: &Command,
+) -> anyhow::Result<HashMap<String, Balances>> {
     let compiled = cmd
         .pattern
         .clone()
@@ -32,7 +36,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         .iter()
         .filter(|tx| naive_to_pacific(tx.date).unwrap() < Utc::now());
 
-    let accounts: HashMap<String, Balances> = past_only
+    Ok(past_only
         .flat_map(|tx| {
             tx.postings
                 .iter()
@@ -56,8 +60,11 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                 *acc.get_mut(a).unwrap() += v
             }
             acc
-        });
+        }))
+}
 
+pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
+    let accounts = calculate_balances(file, cmd)?;
     let declared = file.declared_accounts();
     let accounts = if cmd.actual {
         accounts.clone()
@@ -177,7 +184,7 @@ mod tests {
     }
 }
 
-struct SymbolDecimal<'a> {
+pub struct SymbolDecimal<'a> {
     symbol: &'a str,
     decimal: &'a BigDecimal,
 }
@@ -196,6 +203,18 @@ impl<'a> SymbolDecimal<'a> {
 
     pub fn is_zero(&self) -> bool {
         self.with_scale().is_zero()
+    }
+}
+
+impl<'a> Serialize for SymbolDecimal<'a> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("SymbolDecimal", 2)?;
+        state.serialize_field("symbol", self.symbol)?;
+        state.serialize_field("display", &format!("{}", self))?;
+        state.end()
     }
 }
 

@@ -1,0 +1,9 @@
+{%- macro show_balances(pattern) -%}
+{%- for a in balances_matching(pattern=pattern) -%}
+{%- for c in a.balances -%}
+{%- if c.symbol == "$" -%}
+{{ c.display | lpad(width=20) }} {{ a.name }}
+{% endif -%}
+{%- endfor -%}
+{%- endfor -%}
+{%- endmacro show_balances -%}
