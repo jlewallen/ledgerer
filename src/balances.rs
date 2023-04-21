@@ -50,8 +50,7 @@ pub fn calculate_balances(
                     }
                 })
                 .filter_map(|p| {
-                    p.into_balances()
-                        .map_or(None, |b| Some((p.account.as_str(), b)))
+                    p.into_balances().map(|b| (p.account.as_str(), b))
                 })
         })
         // This is easier than trying to get this to work with group_by
@@ -65,7 +64,7 @@ pub fn calculate_balances(
         });
 
     if cmd.actual {
-        Ok(by_path.clone())
+        Ok(by_path)
     } else {
         Ok(bubble_balances_upward(&by_path, &declared))
     }
@@ -109,7 +108,7 @@ pub fn bubble_balances_upward(
 }
 
 fn get_parents_and_self(p: &str) -> Vec<String> {
-    if p.len() > 0 {
+    if !p.is_empty() {
         std::iter::once(p.to_owned())
             .chain(get_parents(p))
             .collect()

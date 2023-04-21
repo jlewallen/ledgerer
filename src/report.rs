@@ -21,7 +21,7 @@ pub struct Command {
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let everything = calculate_balances(
-        &file,
+        file,
         &balances::Command {
             pattern: None,
             cleared: false,
@@ -30,7 +30,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     )?;
 
     let cleared = calculate_balances(
-        &file,
+        file,
         &balances::Command {
             pattern: None,
             cleared: true,
@@ -97,7 +97,7 @@ fn balances_matching(
                                     name: name.clone(),
                                     balances: balances
                                         .iter()
-                                        .map(|(symbol, total)| SymbolDecimal::new(&symbol, total))
+                                        .map(|(symbol, total)| SymbolDecimal::new(symbol, total))
                                         .filter(|total| !total.with_scale().is_zero())
                                         .map(|total| Ok(to_value(total)?))
                                         .collect::<tera::Result<Vec<Value>>>()?,

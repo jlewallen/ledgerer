@@ -41,16 +41,15 @@ pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> 
     let mut writer = std::io::stdout();
 
     for lot in lots {
-        match lot.price {
-            Some(price) => writeln!(
+        if let Some(price) = lot.price {
+            writeln!(
                 writer,
                 "{} {} {{${}}} [{}]",
                 lot.quantity,
                 lot.symbol,
                 price,
                 lot.date.format("%Y/%m/%d")
-            )?,
-            None => {}
+            )?
         }
     }
 

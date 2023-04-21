@@ -56,7 +56,7 @@ impl Numeric {
                 BigDecimal::from_str(&format!("-{}", a)).expect("Malformed Numeric")
             }
             Numeric::Positive(a, None) => {
-                BigDecimal::from_str(&format!("{}", a)).expect("Malformed Numeric")
+                BigDecimal::from_str(&a.to_string()).expect("Malformed Numeric")
             }
         }
     }
@@ -91,18 +91,18 @@ impl Expression {
         match self {
             Expression::Literal(numeric) => Some(numeric.to_decimal()),
             Expression::Calculated(value) => Some(value.clone()),
-            Expression::Commodity(c) => match &c.price {
-                Some(price) => Some(c.quantity.to_decimal() * price.to_decimal()),
-                None => None,
-            },
+            Expression::Commodity(c) => c
+                .price
+                .as_ref()
+                .map(|price| c.quantity.to_decimal() * price.to_decimal()),
             Expression::Factor(_) => None,
         }
     }
 
     pub fn into_balances(&self) -> Option<Balances> {
         match self {
-            Expression::Literal(numeric) => Some(Balances::new("$".into(), numeric.to_decimal())), // TODO This could be better.
-            Expression::Calculated(decimal) => Some(Balances::new("$".into(), decimal.clone())),
+            Expression::Literal(numeric) => Some(Balances::new("$", numeric.to_decimal())), // TODO This could be better.
+            Expression::Calculated(decimal) => Some(Balances::new("$", decimal.clone())),
             Expression::Commodity(c) => Some(Balances::new(&c.symbol, c.quantity.to_decimal())),
             Expression::Factor(_) => None,
         }
@@ -112,7 +112,7 @@ impl Expression {
 impl std::fmt::Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expression::Literal(numeric) => f.pad(&format!("{}", numeric.to_text_format("$"))),
+            Expression::Literal(numeric) => f.pad(&numeric.to_text_format("$")),
             Expression::Commodity(c) => match c {
                 CommodityExpression {
                     quantity,
@@ -260,11 +260,11 @@ impl Posting {
     }
 
     pub fn has_value(&self) -> Option<BigDecimal> {
-        self.expression.as_ref().map_or(None, |e| e.to_decimal())
+        self.expression.as_ref().and_then(|e| e.to_decimal())
     }
 
     pub fn into_balances(&self) -> Option<Balances> {
-        self.expression.as_ref().map_or(None, |e| e.into_balances())
+        self.expression.as_ref().and_then(|e| e.into_balances())
     }
 }
 
@@ -328,11 +328,11 @@ impl AutomaticTransaction {
 }
 
 pub trait HasNotes {
-    fn into_notes(&self) -> Vec<&String>;
+    fn iter_notes(&self) -> Vec<&String>;
 }
 
 impl HasNotes for Transaction {
-    fn into_notes(&self) -> Vec<&String> {
+    fn iter_notes(&self) -> Vec<&String> {
         self.notes
             .iter()
             .chain(self.postings.iter().filter_map(|p| p.note.as_ref()))
@@ -341,7 +341,7 @@ impl HasNotes for Transaction {
 }
 
 impl HasNotes for AutomaticTransaction {
-    fn into_notes(&self) -> Vec<&String> {
+    fn iter_notes(&self) -> Vec<&String> {
         self.notes
             .iter()
             .chain(self.postings.iter().filter_map(|p| p.note.as_ref()))

@@ -91,17 +91,18 @@ impl LintCheck for RequireTagDeclarationCheck {
 
                 Ok(())
             }
-            Node::Transaction(tx) => Ok(self.check_notes(tx.into_notes().into_iter())?),
-            Node::AutomaticTransaction(tx) => Ok(self.check_notes(tx.into_notes().into_iter())?),
+            Node::Transaction(tx) => Ok(self.check_notes(tx.iter_notes().into_iter())?),
+            Node::AutomaticTransaction(tx) => Ok(self.check_notes(tx.iter_notes().into_iter())?),
             _ => Ok(()),
         }
     }
 }
 
 pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> {
-    let mut checks: Vec<Box<dyn LintCheck>> = Vec::new();
-    checks.push(Box::new(RequireAccountDeclarationsCheck::default()));
-    checks.push(Box::new(RequireTagDeclarationCheck::default()));
+    let mut checks: Vec<Box<dyn LintCheck>> = vec![
+        Box::<RequireAccountDeclarationsCheck>::default(),
+        Box::<RequireTagDeclarationCheck>::default(),
+    ];
 
     for node in file.recursive_iter() {
         for check in checks.iter_mut() {
