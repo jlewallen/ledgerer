@@ -20,11 +20,20 @@ pub struct Command {
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
-    let accounts = calculate_balances(
+    let everything = calculate_balances(
         &file,
         &balances::Command {
             pattern: None,
-            cleared: cmd.cleared,
+            cleared: false,
+            actual: cmd.actual,
+        },
+    )?;
+
+    let cleared = calculate_balances(
+        &file,
+        &balances::Command {
+            pattern: None,
+            cleared: true,
             actual: cmd.actual,
         },
     )?;
@@ -32,7 +41,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     debug!("initializing tera");
     let mut tera = Tera::default();
     tera.register_filter("lpad", lpad);
-    tera.register_function("balances_matching", balances_matching(accounts));
+    tera.register_function("balances_matching", balances_matching(everything, cleared));
     for entry in glob::glob("*.txt.template")? {
         tera.add_template_file(entry?, None)?;
     }
@@ -55,9 +64,17 @@ struct MatchedBalance {
     balances: Vec<tera::Value>,
 }
 
-fn balances_matching(accounts: HashMap<String, Balances>) -> impl Function {
+fn balances_matching(
+    everything: HashMap<String, Balances>,
+    cleared: HashMap<String, Balances>,
+) -> impl Function {
     Box::new(
         move |args: &HashMap<String, Value>| -> tera::Result<Value> {
+            let accounts = match args.get("cleared") {
+                Some(Value::Bool(true)) => &cleared,
+                _ => &everything,
+            };
+
             match args.get("pattern") {
                 Some(pattern) => {
                     let pattern = try_get_value!("balances_matching", "pattern", String, pattern);
