@@ -19,6 +19,8 @@ pub fn calculate_balances(
     file: &LedgerFile,
     cmd: &Command,
 ) -> anyhow::Result<HashMap<String, Balances>> {
+    let declared = file.declared_accounts();
+
     let compiled = cmd
         .pattern
         .clone()
@@ -36,7 +38,7 @@ pub fn calculate_balances(
         .iter()
         .filter(|tx| naive_to_pacific(tx.date).unwrap() < Utc::now());
 
-    Ok(past_only
+    let by_path = past_only
         .flat_map(|tx| {
             tx.postings
                 .iter()
@@ -60,17 +62,17 @@ pub fn calculate_balances(
                 *acc.get_mut(a).unwrap() += v
             }
             acc
-        }))
+        });
+
+    if cmd.actual {
+        Ok(by_path.clone())
+    } else {
+        Ok(bubble_balances_upward(&by_path, &declared))
+    }
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let accounts = calculate_balances(file, cmd)?;
-    let declared = file.declared_accounts();
-    let accounts = if cmd.actual {
-        accounts.clone()
-    } else {
-        bubble_balances_upward(&accounts, &declared)
-    };
 
     if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
         for key in accounts.keys().sorted() {
@@ -87,7 +89,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn bubble_balances_upward(
+pub fn bubble_balances_upward(
     from: &HashMap<String, Balances>,
     declared: &HashMap<String, AccountPath>,
 ) -> HashMap<String, Balances> {

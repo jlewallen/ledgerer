@@ -14,9 +14,9 @@ use crate::{
 pub struct Command {
     paths: Vec<PathBuf>,
     #[arg(short, long)]
-    cleared: bool,
-    #[arg(short, long)]
     actual: bool,
+    #[arg(short, long)]
+    include: Option<String>,
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
@@ -42,8 +42,15 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let mut tera = Tera::default();
     tera.register_filter("lpad", lpad);
     tera.register_function("balances_matching", balances_matching(everything, cleared));
-    for entry in glob::glob("*.txt.template")? {
-        tera.add_template_file(entry?, None)?;
+
+    if let Some(include) = &cmd.include {
+        info!("including {:?}", include);
+        for entry in glob::glob(include)? {
+            let entry = entry?;
+            let name = entry.file_name().map(|f| f.to_str()).unwrap();
+            debug!("including {:?} as {:?}", entry, name);
+            tera.add_template_file(&entry, name)?;
+        }
     }
 
     for path in &cmd.paths {
@@ -110,10 +117,10 @@ fn balances_matching(
 }
 
 pub fn lpad(value: &Value, args: &HashMap<String, Value>) -> tera::Result<Value> {
-    let value = try_get_value!("rpad", "value", String, value);
+    let value = try_get_value!("lpad", "value", String, value);
     match args.get("width") {
         Some(width) => {
-            let width = try_get_value!("rpad", "width", usize, width);
+            let width = try_get_value!("lpad", "width", usize, width);
             Ok(to_value(format!("{:>width$}", value, width = width)).unwrap())
         }
         _ => unimplemented!(),
