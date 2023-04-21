@@ -56,8 +56,8 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     for path in &cmd.paths {
         debug!("loading {}", path.display());
         tera.add_template_file(path, None)?;
-        let context = Context::new();
         info!("rendering {}", path.display());
+        let context = Context::new();
         let text = tera.render(path.to_str().unwrap(), &context)?;
         println!("{}", &text);
     }
@@ -86,13 +86,13 @@ fn balances_matching(
                 Some(pattern) => {
                     let pattern = try_get_value!("balances_matching", "pattern", String, pattern);
                     let pattern =
-                        Regex::new(&pattern).map_err(|_| tera::Error::msg("bad pattern"))?;
+                        Regex::new(&pattern).map_err(|e| tera::Error::msg(e.to_string()))?;
 
                     Ok(to_value(
                         accounts
                             .iter()
                             .filter(|(name, _)| pattern.is_match(name))
-                            .map(|(name, balances)| -> tera::Result<MatchedBalance> {
+                            .map(|(name, balances)| {
                                 Ok(MatchedBalance {
                                     name: name.clone(),
                                     balances: balances
@@ -103,7 +103,7 @@ fn balances_matching(
                                         .collect::<tera::Result<Vec<Value>>>()?,
                                 })
                             })
-                            .collect::<tera::Result<Vec<MatchedBalance>>>()?
+                            .collect::<tera::Result<Vec<_>>>()?
                             .iter()
                             .sorted_unstable_by_key(|m| (m.name.clone()))
                             .inspect(|p| debug!("{:?}", p))
