@@ -1,6 +1,7 @@
+use bigdecimal::ToPrimitive;
 use clap::Args;
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 use tera::{to_value, try_get_value, Context, Function, Tera, Value};
 use tracing::{debug, info};
@@ -41,7 +42,8 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     debug!("initializing tera");
     let mut tera = Tera::default();
     tera.register_filter("lpad", lpad);
-    tera.register_function("balances_matching", balances_matching(everything, cleared));
+    tera.register_filter("meter", meter);
+    tera.register_function("balances", balances_matching(everything, cleared));
 
     if let Some(include) = &cmd.include {
         info!("including {:?}", include);
@@ -65,10 +67,23 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+struct SingleBalance {
+    symbol: String,
+    display: String,
+    total: f32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct MatchedBalance {
     name: String,
-    balances: Vec<tera::Value>,
+    balances: Vec<SingleBalance>,
+}
+
+impl MatchedBalance {
+    fn default_currency_balance(&self) -> Option<&SingleBalance> {
+        self.balances.iter().filter(|b| b.symbol == "$").next()
+    }
 }
 
 fn balances_matching(
@@ -99,8 +114,14 @@ fn balances_matching(
                                         .iter()
                                         .map(|(symbol, total)| SymbolDecimal::new(symbol, total))
                                         .filter(|total| !total.with_scale().is_zero())
-                                        .map(|total| Ok(to_value(total)?))
-                                        .collect::<tera::Result<Vec<Value>>>()?,
+                                        .map(|total| {
+                                            Ok(SingleBalance {
+                                                symbol: total.symbol.to_owned(),
+                                                display: total.to_string(),
+                                                total: total.decimal.to_f32().unwrap(),
+                                            })
+                                        })
+                                        .collect::<tera::Result<Vec<_>>>()?,
                                 })
                             })
                             .collect::<tera::Result<Vec<_>>>()?
@@ -124,5 +145,21 @@ pub fn lpad(value: &Value, args: &HashMap<String, Value>) -> tera::Result<Value>
             Ok(to_value(format!("{:>width$}", value, width = width)).unwrap())
         }
         _ => unimplemented!(),
+    }
+}
+
+pub fn meter(value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Value> {
+    let value = try_get_value!("meter", "value", Vec<MatchedBalance>, value);
+    if value.len() != 1 {
+        return Err(tera::Error::msg("Expected a single balance in 'meter'"));
+    }
+
+    let balances = value.into_iter().next().unwrap();
+    match balances.default_currency_balance() {
+        Some(balance) => {
+            let big_bucks = balance.total / 50.0;
+            Ok(to_value("$".repeat(big_bucks as usize))?)
+        }
+        None => Err(tera::Error::msg("Missing $ balance")),
     }
 }

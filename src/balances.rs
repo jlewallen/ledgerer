@@ -49,9 +49,7 @@ pub fn calculate_balances(
                         true
                     }
                 })
-                .filter_map(|p| {
-                    p.into_balances().map(|b| (p.account.as_str(), b))
-                })
+                .filter_map(|p| p.into_balances().map(|b| (p.account.as_str(), b)))
         })
         // This is easier than trying to get this to work with group_by
         .fold(HashMap::new(), |mut acc, (a, v)| {
@@ -186,8 +184,8 @@ mod tests {
 }
 
 pub struct SymbolDecimal<'a> {
-    symbol: &'a str,
-    decimal: &'a BigDecimal,
+    pub symbol: &'a str,
+    pub decimal: &'a BigDecimal,
 }
 
 impl<'a> SymbolDecimal<'a> {
