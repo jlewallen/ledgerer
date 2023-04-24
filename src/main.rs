@@ -14,6 +14,7 @@ mod json;
 mod lint;
 mod lots;
 mod print;
+mod register;
 mod report;
 
 #[derive(Parser)]
@@ -30,6 +31,7 @@ enum Commands {
     Json(json::Command),
     Print(print::Command),
     Balances(balances::Command),
+    Register(register::Command),
     Lots(lots::Command),
     Lint(lint::Command),
     Report(report::Command),
@@ -61,9 +63,10 @@ fn main() -> Result<()> {
         Some(Commands::Json(cmd)) => json::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Print(cmd)) => print::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Balances(cmd)) => balances::execute_command(&load_ledger_file()?, cmd),
+        Some(Commands::Register(cmd)) => register::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Lots(cmd)) => lots::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Lint(cmd)) => lint::execute_command(&load_ledger_file()?, cmd),
         Some(Commands::Report(cmd)) => report::execute_command(&load_ledger_file()?, cmd),
-        _ => Ok(()),
+        None => Ok(()),
     }
 }
