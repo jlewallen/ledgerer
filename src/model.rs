@@ -584,6 +584,14 @@ impl Balances {
     pub fn iter(&self) -> impl Iterator<Item = (&String, &BigDecimal)> {
         self.by_symbol.iter()
     }
+
+    pub fn abs(&self) -> Self {
+        let mut by_symbol = HashMap::new();
+        for (key, value) in self.by_symbol.iter() {
+            by_symbol.insert(key.clone(), value.abs());
+        }
+        Self { by_symbol }
+    }
 }
 
 impl std::ops::AddAssign<Balances> for Balances {

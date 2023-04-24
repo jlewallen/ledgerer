@@ -2,7 +2,10 @@ use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use clap::Args;
 use regex::Regex;
 use serde::{ser::SerializeStruct, Serialize};
-use std::collections::HashMap;
+use std::collections::{
+    hash_map::{Iter, Keys},
+    HashMap,
+};
 
 use crate::model::*;
 
@@ -15,10 +18,34 @@ pub struct Command {
     pub actual: bool,
 }
 
-pub fn calculate_balances(
-    file: &LedgerFile,
-    cmd: &Command,
-) -> anyhow::Result<HashMap<String, Balances>> {
+#[derive(Clone)]
+pub struct BalancesByAccount {
+    map: HashMap<String, Balances>,
+}
+
+impl BalancesByAccount {
+    pub fn abs(&self) -> BalancesByAccount {
+        let mut map: HashMap<String, Balances> = HashMap::new();
+        for (key, value) in self.map.iter() {
+            map.insert(key.clone(), value.abs());
+        }
+        Self { map }
+    }
+
+    pub fn keys(&self) -> Keys<String, Balances> {
+        self.map.keys()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Balances> {
+        self.map.get(name)
+    }
+
+    pub fn iter(&self) -> Iter<String, Balances> {
+        self.map.iter()
+    }
+}
+
+pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<BalancesByAccount> {
     let declared = file.declared_accounts();
 
     let compiled = cmd
@@ -62,9 +89,11 @@ pub fn calculate_balances(
         });
 
     if cmd.actual {
-        Ok(by_path)
+        Ok(BalancesByAccount { map: by_path })
     } else {
-        Ok(bubble_balances_upward(&by_path, &declared))
+        Ok(BalancesByAccount {
+            map: bubble_balances_upward(&by_path, &declared),
+        })
     }
 }
 

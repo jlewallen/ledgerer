@@ -7,7 +7,7 @@ use tera::{to_value, try_get_value, Context, Function, Tera, Value};
 use tracing::{debug, info};
 
 use crate::{
-    balances::{self, calculate_balances, SymbolDecimal},
+    balances::{self, calculate_balances, BalancesByAccount, SymbolDecimal},
     model::*,
 };
 
@@ -21,23 +21,20 @@ pub struct Command {
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
-    let everything = calculate_balances(
-        file,
-        &balances::Command {
-            pattern: None,
-            cleared: false,
-            actual: cmd.actual,
-        },
-    )?;
+    let calculate = |cleared| {
+        calculate_balances(
+            file,
+            &balances::Command {
+                pattern: None,
+                cleared,
+                actual: cmd.actual,
+            },
+        )
+    };
 
-    let cleared = calculate_balances(
-        file,
-        &balances::Command {
-            pattern: None,
-            cleared: true,
-            actual: cmd.actual,
-        },
-    )?;
+    let everything = calculate(false)?;
+
+    let cleared = calculate(true)?;
 
     debug!("initializing tera");
     let mut tera = Tera::default();
@@ -86,10 +83,7 @@ impl MatchedBalance {
     }
 }
 
-fn balances_matching(
-    everything: HashMap<String, Balances>,
-    cleared: HashMap<String, Balances>,
-) -> impl Function {
+fn balances_matching(everything: BalancesByAccount, cleared: BalancesByAccount) -> impl Function {
     Box::new(
         move |args: &HashMap<String, Value>| -> tera::Result<Value> {
             let accounts = match args.get("cleared") {
@@ -97,9 +91,14 @@ fn balances_matching(
                 _ => &everything,
             };
 
+            let accounts = match args.get("abs") {
+                Some(Value::Bool(true)) => accounts.abs(),
+                _ => accounts.clone(),
+            };
+
             match args.get("pattern") {
                 Some(pattern) => {
-                    let pattern = try_get_value!("balances_matching", "pattern", String, pattern);
+                    let pattern = try_get_value!("balances", "pattern", String, pattern);
                     let pattern =
                         Regex::new(&pattern).map_err(|e| tera::Error::msg(e.to_string()))?;
 
