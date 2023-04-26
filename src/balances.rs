@@ -2,9 +2,12 @@ use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use clap::Args;
 use regex::Regex;
 use serde::{ser::SerializeStruct, Serialize};
-use std::collections::{
-    hash_map::{Iter, Keys},
-    HashMap,
+use std::{
+    collections::{
+        hash_map::{Iter, Keys},
+        HashMap,
+    },
+    ops::Neg,
 };
 
 use crate::model::*;
@@ -16,6 +19,12 @@ pub struct Command {
     pub cleared: bool,
     #[arg(short, long)]
     pub actual: bool,
+    #[arg(short, long)]
+    pub invert: bool,
+    #[arg(long)]
+    pub posting_format: bool,
+    #[arg(short, long)]
+    pub before: Option<String>,
 }
 
 #[derive(Clone)]
@@ -56,6 +65,14 @@ pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<Ba
         // x.map_or(Ok(None), |v| v.map(Some))
         .map_or(Ok(None), |v| v.map(Some))
         .unwrap();
+
+    let before_date = cmd
+        .before
+        .as_ref()
+        .map_or(Ok::<DateTime<Utc>, anyhow::Error>(Utc::now()), |o| {
+            Ok(naive_to_pacific(NaiveDate::parse_from_str(&o, "%m/%d/%Y")?)?.with_timezone(&Utc))
+        })?;
+
     let sorted = file
         .iter_transactions_in_order()
         .filter(|t| !cmd.cleared || t.cleared)
@@ -63,7 +80,7 @@ pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<Ba
 
     let past_only = sorted
         .iter()
-        .filter(|tx| naive_to_pacific(tx.date).unwrap() < Utc::now());
+        .filter(|tx| naive_to_pacific(tx.date).unwrap() < before_date);
 
     let by_path = past_only
         .flat_map(|tx| {
@@ -104,9 +121,16 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         for key in accounts.keys().sorted() {
             let value = accounts.get(key).unwrap();
             for (symbol, value) in value.iter() {
+                // Would rather do this conditionally, except SymbolDecimal takes a reference.
+                let inverted = value.neg();
+                let value = if cmd.invert { &inverted } else { value };
                 let pretty = SymbolDecimal::new(symbol, value);
                 if !pretty.is_zero() {
-                    println!("{:>20} {}", pretty, key);
+                    if cmd.posting_format {
+                        println!("    {:76} {:>20}", key, pretty);
+                    } else {
+                        println!("{:>20} {}", pretty, key);
+                    }
                 }
             }
         }
