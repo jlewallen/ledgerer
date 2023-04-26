@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use clap::Args;
 use itertools::Itertools;
 use regex::Regex;
+use tracing::info;
 
 use crate::model::{HasNotes, LedgerFile, Node, Posting};
 
@@ -11,6 +12,7 @@ pub struct Command {}
 
 trait LintCheck {
     fn check_node(&mut self, node: &Node) -> anyhow::Result<()>;
+    fn done(&mut self) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, Default)]
@@ -43,27 +45,15 @@ impl LintCheck for RequireAccountDeclarationsCheck {
             _ => Ok(()),
         }
     }
+
+    fn done(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
 struct RequireTagDeclarationCheck {
     tags: HashMap<String, bool>,
-}
-
-fn find_note_tags(note: &str) -> Vec<String> {
-    use lazy_static::lazy_static;
-    lazy_static! {
-        static ref PLAIN: Regex = Regex::new(r"(:?:([a-z-]+))").unwrap();
-        static ref TAGGED: Regex = Regex::new(r"(:?:([\w-]+)=(:?[^\s:=]+))*$").unwrap();
-    }
-
-    PLAIN
-        .captures_iter(note)
-        .chain(TAGGED.captures_iter(note))
-        .filter_map(|c| c.get(2))
-        .map(|m| m.as_str().to_owned())
-        .unique()
-        .collect()
 }
 
 impl RequireTagDeclarationCheck {
@@ -96,12 +86,56 @@ impl LintCheck for RequireTagDeclarationCheck {
             _ => Ok(()),
         }
     }
+
+    fn done(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct UnusedAccountDeclaration {
+    unused: HashMap<String, bool>,
+}
+
+impl UnusedAccountDeclaration {
+    fn check_postings(&mut self, postings: &[Posting]) -> Result<(), anyhow::Error> {
+        for ap in postings.iter().map(|p| &p.account) {
+            if self.unused.contains_key(ap.as_str()) {
+                self.unused.remove(ap.as_str());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl LintCheck for UnusedAccountDeclaration {
+    fn check_node(&mut self, node: &Node) -> anyhow::Result<()> {
+        match node {
+            Node::AccountDeclaration(ap) => {
+                self.unused.insert(ap.as_str().to_owned(), true);
+
+                Ok(())
+            }
+            Node::Transaction(tx) => self.check_postings(&tx.postings),
+            Node::AutomaticTransaction(tx) => self.check_postings(&tx.postings),
+            _ => Ok(()),
+        }
+    }
+
+    fn done(&mut self) -> anyhow::Result<()> {
+        for key in self.unused.keys().sorted() {
+            info!("Unused {}", key);
+        }
+        Ok(())
+    }
 }
 
 pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> {
     let mut checks: Vec<Box<dyn LintCheck>> = vec![
         Box::<RequireAccountDeclarationsCheck>::default(),
         Box::<RequireTagDeclarationCheck>::default(),
+        Box::<UnusedAccountDeclaration>::default(),
     ];
 
     for node in file.recursive_iter() {
@@ -110,7 +144,27 @@ pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> 
         }
     }
 
+    for check in checks.iter_mut() {
+        check.done()?;
+    }
+
     Ok(())
+}
+
+fn find_note_tags(note: &str) -> Vec<String> {
+    use lazy_static::lazy_static;
+    lazy_static! {
+        static ref PLAIN: Regex = Regex::new(r"(:?:([a-z-]+))").unwrap();
+        static ref TAGGED: Regex = Regex::new(r"(:?:([\w-]+)=(:?[^\s:=]+))*$").unwrap();
+    }
+
+    PLAIN
+        .captures_iter(note)
+        .chain(TAGGED.captures_iter(note))
+        .filter_map(|c| c.get(2))
+        .map(|m| m.as_str().to_owned())
+        .unique()
+        .collect()
 }
 
 #[cfg(test)]
