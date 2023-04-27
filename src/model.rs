@@ -529,29 +529,45 @@ impl LedgerFile {
         self.nodes.iter()
     }
 
-    pub fn sorted_nodes_iter(&self) -> impl Iterator<Item = &Node> {
-        let mapped = self.nodes_iter().scan((NaiveDate::MIN, 0), |acc, node| {
-            let node_date: Option<NaiveDate> = match node {
-                Node::Transaction(tx) => Some(tx.date),
-                Node::CommodityPrice(p) => Some(p.date),
-                _ => None,
-            };
+    pub fn sortable_nodes_iter(&self) -> impl Iterator<Item = SortedNode> {
+        sortable_nodes(self.nodes_iter())
+    }
+}
 
-            *acc = node_date.map_or((acc.0, acc.1 + 1), |d| {
-                if d == acc.0 {
-                    (acc.0, acc.1 + 1)
-                } else {
-                    (d, acc.1 + 1)
-                }
-            });
+pub struct SortedNode<'a>(NaiveDate, usize, &'a Node);
 
-            Some((acc.0, acc.1, node))
+impl<'a> SortedNode<'a> {
+    pub fn date(&self) -> &NaiveDate {
+        &self.0
+    }
+}
+
+pub fn sortable_nodes<'a>(
+    i: impl Iterator<Item = &'a Node>,
+) -> impl Iterator<Item = SortedNode<'a>> {
+    i.scan((NaiveDate::MIN, 0), |acc, node| {
+        let node_date: Option<NaiveDate> = match node {
+            Node::Transaction(tx) => Some(tx.date),
+            Node::CommodityPrice(p) => Some(p.date),
+            _ => None,
+        };
+
+        *acc = node_date.map_or((acc.0, acc.1 + 1), |d| {
+            if d == acc.0 {
+                (acc.0, acc.1 + 1)
+            } else {
+                (d, acc.1 + 1)
+            }
         });
 
-        let mut sortable: Vec<_> = mapped.collect();
-        sortable.sort_unstable_by_key(|i| (i.0, i.1));
-        sortable.into_iter().map(|i| i.2)
-    }
+        Some(SortedNode(acc.0, acc.1, node))
+    })
+}
+
+pub fn sort_nodes<'a>(i: impl Iterator<Item = SortedNode<'a>>) -> impl Iterator<Item = &'a Node> {
+    let mut sortable: Vec<_> = i.collect();
+    sortable.sort_unstable_by_key(|i| (i.0, i.1));
+    sortable.into_iter().map(|i| i.2)
 }
 
 fn include_glob(path: &str) -> Result<Vec<Node>> {

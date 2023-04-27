@@ -36,7 +36,6 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     };
 
     let everything = calculate(false)?;
-
     let cleared = calculate(true)?;
 
     debug!("initializing tera");

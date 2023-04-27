@@ -279,7 +279,7 @@ impl<'a> std::fmt::Display for SymbolDecimal<'a> {
     }
 }
 
-fn naive_to_pacific(date: NaiveDate) -> Result<DateTime<chrono_tz::Tz>> {
+pub fn naive_to_pacific(date: NaiveDate) -> Result<DateTime<chrono_tz::Tz>> {
     let and_time = NaiveDateTime::new(date, NaiveTime::MIN);
     and_time
         .and_local_timezone(chrono_tz::US::Pacific)
