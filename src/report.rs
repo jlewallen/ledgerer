@@ -152,7 +152,7 @@ fn get_string_with_width(
             let width = try_get_value!(name, "width", usize, width);
             Ok((value, width))
         }
-        _ => unimplemented!(),
+        _ => Err(tera::Error::msg("Missing width parameter.")),
     }
 }
 
