@@ -18,6 +18,8 @@ pub struct Command {
     actual: bool,
     #[arg(short, long)]
     include: Option<String>,
+    #[arg(short, long)]
+    pub before: Option<String>,
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
@@ -30,7 +32,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                 actual: cmd.actual,
                 invert: false,
                 posting_format: false,
-                before: None,
+                before: cmd.before.clone(),
             },
         )
     };
