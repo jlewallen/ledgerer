@@ -21,7 +21,7 @@ pub struct Printer {
     pub before: Option<DateTime<Utc>>,
 }
 
-pub fn to_pacific(v: &Option<String>) -> Result<Option<DateTime<Utc>>> {
+pub fn optional_naive_to_pacific(v: &Option<String>) -> Result<Option<DateTime<Utc>>> {
     v.as_ref()
         .map_or(Ok::<Option<DateTime<Utc>>, anyhow::Error>(None), |o| {
             Ok(Some(
@@ -32,8 +32,8 @@ pub fn to_pacific(v: &Option<String>) -> Result<Option<DateTime<Utc>>> {
 
 impl Printer {
     pub fn from(cmd: &Command) -> Result<Self> {
-        let after = to_pacific(&cmd.after)?;
-        let before = to_pacific(&cmd.before)?;
+        let after = optional_naive_to_pacific(&cmd.after)?;
+        let before = optional_naive_to_pacific(&cmd.before)?;
 
         Ok(Self {
             after,
@@ -132,10 +132,23 @@ impl Printer {
         w: &mut impl Write,
         iter: impl Iterator<Item = &'a Node>,
     ) -> Result<(), std::io::Error> {
-        for node in sort_nodes(sortable_nodes(iter).filter(|sn| match self.before {
-            Some(before) => naive_to_pacific(sn.date().clone()).unwrap() < before,
-            None => true,
-        })) {
+        for node in sort_nodes(
+            sortable_nodes(iter)
+                .filter(|sn| match self.before {
+                    Some(before) => naive_to_pacific(sn.date().clone()).unwrap() < before,
+                    None => true,
+                })
+                .filter(|sn| match self.after {
+                    Some(after) => {
+                        if *sn.date() == NaiveDate::MIN {
+                            true
+                        } else {
+                            naive_to_pacific(sn.date().clone()).unwrap() > after
+                        }
+                    }
+                    None => true,
+                }),
+        ) {
             self.write_node(w, node)?;
         }
 

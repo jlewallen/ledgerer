@@ -40,6 +40,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
 
     debug!("initializing tera");
     let mut tera = Tera::default();
+    tera.register_filter("rpad", rpad);
     tera.register_filter("lpad", lpad);
     tera.register_filter("meter", meter);
     tera.register_function("balances", balances_matching(everything, cleared));
@@ -138,15 +139,29 @@ fn balances_matching(everything: BalancesByAccount, cleared: BalancesByAccount) 
     )
 }
 
-pub fn lpad(value: &Value, args: &HashMap<String, Value>) -> tera::Result<Value> {
-    let value = try_get_value!("lpad", "value", String, value);
+fn get_string_with_width(
+    name: &str,
+    value: &Value,
+    args: &HashMap<String, Value>,
+) -> tera::Result<(String, usize)> {
+    let value = try_get_value!(name, "value", String, value);
     match args.get("width") {
         Some(width) => {
-            let width = try_get_value!("lpad", "width", usize, width);
-            Ok(to_value(format!("{:>width$}", value, width = width)).unwrap())
+            let width = try_get_value!(name, "width", usize, width);
+            Ok((value, width))
         }
         _ => unimplemented!(),
     }
+}
+
+pub fn rpad(value: &Value, args: &HashMap<String, Value>) -> tera::Result<Value> {
+    let (value, width) = get_string_with_width("rpad", value, args)?;
+    Ok(to_value(format!("{:width$}", value, width = width)).unwrap())
+}
+
+pub fn lpad(value: &Value, args: &HashMap<String, Value>) -> tera::Result<Value> {
+    let (value, width) = get_string_with_width("lpad", value, args)?;
+    Ok(to_value(format!("{:>width$}", value, width = width)).unwrap())
 }
 
 pub fn meter(value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Value> {
