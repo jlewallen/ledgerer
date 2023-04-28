@@ -1,13 +1,9 @@
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use clap::Args;
 use regex::Regex;
-use serde::{ser::SerializeStruct, Serialize};
-use std::{
-    collections::{
-        hash_map::{Iter, Keys},
-        HashMap,
-    },
-    ops::Neg,
+use std::collections::{
+    hash_map::{Iter, Keys},
+    HashMap,
 };
 
 use crate::model::*;
@@ -93,7 +89,10 @@ pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<Ba
                         true
                     }
                 })
-                .filter_map(|p| p.into_balances().map(|b| (p.account.as_str(), b)))
+                .filter_map(|p| {
+                    p.into_balance()
+                        .map(|b| (p.account.as_str(), Balances::new_from_balance(b)))
+                })
         })
         // This is easier than trying to get this to work with group_by
         .fold(HashMap::new(), |mut acc, (a, v)| {
@@ -120,16 +119,15 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
         for key in accounts.keys().sorted() {
             let value = accounts.get(key).unwrap();
-            for (symbol, value) in value.iter() {
+            for balance in value.iter() {
                 // Would rather do this conditionally, except SymbolDecimal takes a reference.
-                let inverted = value.neg();
-                let value = if cmd.invert { &inverted } else { value };
-                let pretty = SymbolDecimal::new(symbol, value);
-                if !pretty.is_zero() {
+                let inverted = balance.neg();
+                let balance = if cmd.invert { &inverted } else { balance };
+                if !balance.is_zero() {
                     if cmd.posting_format {
-                        println!("    {:76} {:>20}", key, pretty);
+                        println!("    {:76} {:>30}", key, balance);
                     } else {
-                        println!("{:>20} {}", pretty, key);
+                        println!("{:>30} {}", balance, key);
                     }
                 }
             }
@@ -233,49 +231,6 @@ mod tests {
             get_parents("first:second:third"),
             vec!["first:second", "first"]
         );
-    }
-}
-
-pub struct SymbolDecimal<'a> {
-    pub symbol: &'a str,
-    pub decimal: &'a BigDecimal,
-}
-
-impl<'a> SymbolDecimal<'a> {
-    pub fn new(symbol: &'a str, decimal: &'a BigDecimal) -> Self {
-        Self { symbol, decimal }
-    }
-
-    pub fn with_scale(&self) -> BigDecimal {
-        match self.symbol {
-            "$" => self.decimal.with_scale(2),
-            _ => self.decimal.clone(),
-        }
-    }
-
-    pub fn is_zero(&self) -> bool {
-        self.with_scale().is_zero()
-    }
-}
-
-impl<'a> Serialize for SymbolDecimal<'a> {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut state = serializer.serialize_struct("SymbolDecimal", 2)?;
-        state.serialize_field("symbol", self.symbol)?;
-        state.serialize_field("display", &format!("{}", self))?;
-        state.end()
-    }
-}
-
-impl<'a> std::fmt::Display for SymbolDecimal<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.symbol {
-            "$" => f.pad(&format!("${}", self.decimal.with_scale(2))),
-            _ => f.pad(&format!("{} {}", self.symbol, self.decimal)),
-        }
     }
 }
 

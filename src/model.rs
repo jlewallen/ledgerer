@@ -1,7 +1,10 @@
 use anyhow::anyhow;
+#[allow(unused_imports)]
+use bigdecimal::ToPrimitive;
 use serde::{ser::SerializeStruct, Serialize};
 use std::{
     collections::HashMap,
+    ops::Neg,
     path::{Path, PathBuf},
     str::FromStr,
     sync::atomic::AtomicU64,
@@ -99,11 +102,15 @@ impl Expression {
         }
     }
 
-    pub fn into_balances(&self) -> Option<Balances> {
+    pub fn into_balance(&self) -> Option<Balance> {
         match self {
-            Expression::Literal(numeric) => Some(Balances::new("$", numeric.to_decimal())), // TODO This could be better.
-            Expression::Calculated(decimal) => Some(Balances::new("$", decimal.clone())),
-            Expression::Commodity(c) => Some(Balances::new(&c.symbol, c.quantity.to_decimal())),
+            Expression::Literal(numeric) => Some(Balance::currency("$", numeric.to_decimal())), // TODO This could be better.
+            Expression::Calculated(decimal) => Some(Balance::currency("$", decimal.clone())),
+            Expression::Commodity(c) => Some(Balance::commodity(
+                &c.symbol,
+                c.quantity.to_decimal(),
+                c.price.as_ref().map(|p| p.to_decimal()),
+            )),
             Expression::Factor(_) => None,
         }
     }
@@ -263,8 +270,8 @@ impl Posting {
         self.expression.as_ref().and_then(|e| e.to_decimal())
     }
 
-    pub fn into_balances(&self) -> Option<Balances> {
-        self.expression.as_ref().and_then(|e| e.into_balances())
+    pub fn into_balance(&self) -> Option<Balance> {
+        self.expression.as_ref().and_then(|e| e.into_balance())
     }
 }
 
@@ -585,20 +592,177 @@ fn include_glob(path: &str) -> Result<Vec<Node>> {
     Ok(nodes)
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct Balances {
-    by_symbol: HashMap<String, BigDecimal>,
+#[derive(Debug, Clone)]
+pub struct Lot {
+    #[allow(dead_code)]
+    date: Option<NaiveDate>,
+    quantity: BigDecimal,
+    price: Option<BigDecimal>,
 }
 
-impl Balances {
-    pub fn new(symbol: &str, value: BigDecimal) -> Self {
+impl Lot {
+    pub fn new(quantity: BigDecimal, price: Option<BigDecimal>) -> Self {
         Self {
-            by_symbol: vec![(symbol.to_owned(), value)].into_iter().collect(),
+            date: None,
+            quantity,
+            price,
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &BigDecimal)> {
-        self.by_symbol.iter()
+    pub fn sum(lots: &Vec<Self>) -> Self {
+        if lots
+            .iter()
+            .any(|l| l.price.is_none() || l.price.as_ref().unwrap().is_zero())
+        {
+            panic!("Sorry, all lots are required to have prices!");
+        }
+
+        let quantity: BigDecimal = lots.iter().map(|l| l.quantity.clone()).sum();
+        if quantity.is_zero() {
+            Self {
+                date: None,
+                quantity: quantity,
+                price: None,
+            }
+        } else {
+            let price = lots
+                .iter()
+                .filter_map(|l| l.price.as_ref().map(|p| p * &l.quantity))
+                .sum::<BigDecimal>()
+                / quantity.clone();
+
+            Self {
+                date: None,
+                quantity,
+                price: Some(price.with_scale(2)),
+            }
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.quantity.is_zero()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Balance {
+    Currency { symbol: String, value: BigDecimal },
+    Commodity { symbol: String, lots: Vec<Lot> },
+}
+
+impl Balance {
+    pub fn currency(symbol: &str, value: BigDecimal) -> Self {
+        Self::Currency {
+            symbol: symbol.to_owned(),
+            value,
+        }
+    }
+
+    pub fn commodity(symbol: &str, quantity: BigDecimal, price: Option<BigDecimal>) -> Self {
+        Self::Commodity {
+            symbol: symbol.to_owned(),
+            lots: vec![Lot::new(quantity, price)],
+        }
+    }
+
+    pub fn symbol(&self) -> &str {
+        match self {
+            Balance::Currency { symbol, value: _ } => symbol,
+            Balance::Commodity { symbol, lots: _ } => symbol,
+        }
+    }
+
+    // Cow on balance? Also this is ill-defined for Commodities and perhaps we
+    // should error and require a filter step before?
+    pub fn abs(&self) -> Balance {
+        match self {
+            Balance::Currency { symbol, value } => Balance::Currency {
+                symbol: symbol.clone(),
+                value: value.abs(),
+            },
+            _ => self.clone(),
+        }
+    }
+
+    // Cow on balance? Also this is ill-defined for Commodities and perhaps we
+    // should error and require a filter step before?
+    pub fn neg(&self) -> Balance {
+        match self {
+            Balance::Currency { symbol, value } => Balance::Currency {
+                symbol: symbol.clone(),
+                value: value.neg(),
+            },
+            _ => self.clone(),
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Balance::Currency { symbol: _, value } => value.is_zero(),
+            Balance::Commodity { symbol: _, lots } => Lot::sum(lots).is_zero(),
+        }
+    }
+
+    pub fn value(&self) -> Option<f32> {
+        match self {
+            Balance::Currency { symbol: _, value } => value.to_f32(),
+            Balance::Commodity { symbol: _, lots } => {
+                Lot::sum(lots).price.map_or(None, |p| p.to_f32())
+            }
+        }
+    }
+}
+
+impl Serialize for Balance {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("Balance", 2)?;
+        state.serialize_field("symbol", self.symbol())?;
+        state.serialize_field("display", &format!("{}", self))?;
+        state.end()
+    }
+}
+
+// We might be able to get away with creating an Expression and displaying that?
+impl std::fmt::Display for Balance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Balance::Currency { symbol, value } => match symbol.as_str() {
+                "$" => f.pad(&format!("${}", value.with_scale(2))),
+                _ => unimplemented!("Display for Currency '{}'", symbol),
+            },
+            Balance::Commodity { symbol, lots } => {
+                let sum = Lot::sum(lots);
+                match sum.price {
+                    Some(price) => f.pad(&format!("{} {} @ ${}", symbol, sum.quantity, price)),
+                    None => f.pad(&format!("{} {}", symbol, sum.quantity)),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Balances {
+    by_symbol: HashMap<String, Balance>,
+}
+
+impl Balances {
+    pub fn new_from_balance(balance: Balance) -> Self {
+        Self {
+            by_symbol: vec![(balance.symbol().to_owned(), balance)]
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    pub fn new(symbol: &str, value: BigDecimal) -> Self {
+        Self::new_from_balance(Balance::Currency {
+            symbol: symbol.to_owned(),
+            value,
+        })
     }
 
     pub fn abs(&self) -> Self {
@@ -607,6 +771,10 @@ impl Balances {
             by_symbol.insert(key.clone(), value.abs());
         }
         Self { by_symbol }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Balance> {
+        self.by_symbol.values()
     }
 }
 
@@ -618,6 +786,38 @@ impl std::ops::AddAssign<Balances> for Balances {
             } else {
                 self.by_symbol.insert(key.to_owned(), value.clone());
             }
+        }
+    }
+}
+
+impl std::ops::AddAssign<&Balance> for Balance {
+    fn add_assign(&mut self, rhs: &Balance) {
+        assert_eq!(self.symbol(), rhs.symbol());
+
+        match self {
+            Balance::Currency { symbol: _, value } => match rhs {
+                Balance::Currency {
+                    symbol: _,
+                    value: rhs,
+                } => {
+                    *value += rhs;
+                }
+                Balance::Commodity { symbol: _, lots: _ } => {
+                    panic!("Bug: refusing to add Currency and Commodity")
+                }
+            },
+            Balance::Commodity { symbol: _, lots } => match rhs {
+                Balance::Currency {
+                    symbol: _,
+                    value: _,
+                } => {
+                    panic!("Bug: refusing to add Currency and Commodity")
+                }
+                Balance::Commodity {
+                    symbol: _,
+                    lots: rhs,
+                } => lots.extend(rhs.clone()),
+            },
         }
     }
 }

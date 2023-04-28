@@ -1,4 +1,3 @@
-use bigdecimal::ToPrimitive;
 use clap::Args;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -7,7 +6,7 @@ use tera::{to_value, try_get_value, Context, Function, Tera, Value};
 use tracing::{debug, info};
 
 use crate::{
-    balances::{self, calculate_balances, BalancesByAccount, SymbolDecimal},
+    balances::{self, calculate_balances, BalancesByAccount},
     model::*,
 };
 
@@ -73,7 +72,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
 struct SingleBalance {
     symbol: String,
     display: String,
-    total: f32,
+    total: Option<f32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -116,13 +115,12 @@ fn balances_matching(everything: BalancesByAccount, cleared: BalancesByAccount) 
                                     name: name.clone(),
                                     balances: balances
                                         .iter()
-                                        .map(|(symbol, total)| SymbolDecimal::new(symbol, total))
-                                        .filter(|total| !total.with_scale().is_zero())
-                                        .map(|total| {
+                                        .filter(|balance| !balance.is_zero())
+                                        .map(|balance| {
                                             Ok(SingleBalance {
-                                                symbol: total.symbol.to_owned(),
-                                                display: total.to_string(),
-                                                total: total.decimal.to_f32().unwrap(),
+                                                symbol: balance.symbol().to_owned(),
+                                                display: format!("{}", balance),
+                                                total: balance.value(),
                                             })
                                         })
                                         .collect::<tera::Result<Vec<_>>>()?,
@@ -174,10 +172,13 @@ pub fn meter(value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Valu
 
     let balances = value.into_iter().next().unwrap();
     match balances.default_currency_balance() {
-        Some(balance) => {
-            let big_bucks = balance.total / 50.0;
-            Ok(to_value("$".repeat(big_bucks as usize))?)
-        }
+        Some(balance) => match balance.total {
+            Some(total) => {
+                let big_bucks = total / 50.0;
+                Ok(to_value("$".repeat(big_bucks as usize))?)
+            }
+            None => Ok(to_value("?")?),
+        },
         None => Err(tera::Error::msg("Missing $ balance")),
     }
 }
