@@ -794,30 +794,26 @@ impl std::ops::AddAssign<&Balance> for Balance {
     fn add_assign(&mut self, rhs: &Balance) {
         assert_eq!(self.symbol(), rhs.symbol());
 
-        match self {
-            Balance::Currency { symbol: _, value } => match rhs {
+        match (self, rhs) {
+            (
+                Balance::Currency { symbol: _, value },
                 Balance::Currency {
                     symbol: _,
                     value: rhs,
-                } => {
-                    *value += rhs;
-                }
-                Balance::Commodity { symbol: _, lots: _ } => {
-                    panic!("Bug: refusing to add Currency and Commodity")
-                }
-            },
-            Balance::Commodity { symbol: _, lots } => match rhs {
-                Balance::Currency {
-                    symbol: _,
-                    value: _,
-                } => {
-                    panic!("Bug: refusing to add Currency and Commodity")
-                }
+                },
+            ) => {
+                *value += rhs;
+            }
+            (
+                Balance::Commodity { symbol: _, lots },
                 Balance::Commodity {
                     symbol: _,
                     lots: rhs,
-                } => lots.extend(rhs.clone()),
-            },
+                },
+            ) => {
+                lots.extend(rhs.clone());
+            }
+            _ => panic!("Bug: refusing to add Currency and Commodity"),
         }
     }
 }
