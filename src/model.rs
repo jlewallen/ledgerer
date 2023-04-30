@@ -736,7 +736,7 @@ impl std::fmt::Display for Balance {
             Balance::Commodity { symbol, lots } => {
                 let sum = Lot::sum(lots);
                 match sum.price {
-                    Some(price) => f.pad(&format!("{} {} @ ${}", symbol, sum.quantity, price)),
+                    Some(price) => f.pad(&format!("{} {} @ ${}", sum.quantity, symbol, price)),
                     None => f.pad(&format!("{} {}", symbol, sum.quantity)),
                 }
             }
