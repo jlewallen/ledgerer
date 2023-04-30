@@ -2,13 +2,17 @@ use clap::Args;
 use ellipse::Ellipse;
 use terminal_size::{terminal_size, Width};
 
-use crate::model::*;
+use crate::{balances::naive_to_pacific, model::*, print::optional_naive_to_pacific};
 
 #[derive(Debug, Args)]
 pub struct Command {
     pub pattern: Option<String>,
     #[arg(short, long)]
     pub cleared: bool,
+    #[arg(short, long)]
+    pub before: Option<String>,
+    #[arg(short, long)]
+    pub after: Option<String>,
 }
 
 struct Format {
@@ -36,10 +40,28 @@ impl Format {
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
+    let after = optional_naive_to_pacific(&cmd.after)?;
+    let before = optional_naive_to_pacific(&cmd.before)?;
+
     let format = Format::new();
     for tx in file
         .iter_transactions_in_order()
         .filter(|tx| !cmd.cleared || tx.cleared)
+        // This also happens in 'print' and it would be nice to avoid this duplication.
+        .filter(|tx| match before {
+            Some(before) => naive_to_pacific(tx.date.clone()).unwrap() < before,
+            None => true,
+        })
+        .filter(|tx| match after {
+            Some(after) => {
+                if tx.date == NaiveDate::MIN {
+                    true
+                } else {
+                    naive_to_pacific(tx.date.clone()).unwrap() >= after
+                }
+            }
+            None => true,
+        })
     {
         let mut prefix = format!("{} {}", tx.date, tx.payee);
         for posting in tx.postings.iter() {

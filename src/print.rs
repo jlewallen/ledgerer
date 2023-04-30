@@ -143,7 +143,7 @@ impl Printer {
                         if *sn.date() == NaiveDate::MIN {
                             true
                         } else {
-                            naive_to_pacific(sn.date().clone()).unwrap() > after
+                            naive_to_pacific(sn.date().clone()).unwrap() >= after
                         }
                     }
                     None => true,
