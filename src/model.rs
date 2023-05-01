@@ -357,7 +357,7 @@ impl HasNotes for AutomaticTransaction {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct CommodityPrice {
+pub struct DatedPrice {
     pub date: NaiveDate,
     pub symbol: String,
     pub expression: Expression,
@@ -373,7 +373,7 @@ pub enum Node {
     Included(String, Vec<Node>),
     Generated(Vec<Node>),
     DefaultCommodity(String),
-    CommodityPrice(CommodityPrice),
+    DatedPrice(DatedPrice),
     CommodityDeclaration(String),
     AutomaticTransaction(AutomaticTransaction),
     EmptyLine,
@@ -555,7 +555,7 @@ pub fn sortable_nodes<'a>(
     i.scan((NaiveDate::MIN, 0), |acc, node| {
         let node_date: Option<NaiveDate> = match node {
             Node::Transaction(tx) => Some(tx.date),
-            Node::CommodityPrice(p) => Some(p.date),
+            Node::DatedPrice(p) => Some(p.date),
             _ => None,
         };
 
@@ -752,17 +752,8 @@ pub struct Balances {
 impl Balances {
     pub fn new_from_balance(balance: Balance) -> Self {
         Self {
-            by_symbol: vec![(balance.symbol().to_owned(), balance)]
-                .into_iter()
-                .collect(),
+            by_symbol: HashMap::from([(balance.symbol().to_owned(), balance)]),
         }
-    }
-
-    pub fn new(symbol: &str, value: BigDecimal) -> Self {
-        Self::new_from_balance(Balance::Currency {
-            symbol: symbol.to_owned(),
-            value,
-        })
     }
 
     pub fn abs(&self) -> Self {

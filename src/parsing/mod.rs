@@ -44,7 +44,7 @@ fn parse_automatic_transaction(i: &str) -> IResult<&str, Node> {
     )(i)
 }
 
-fn parse_commodity_price(i: &str) -> IResult<&str, Node> {
+fn parse_dated_price(i: &str) -> IResult<&str, Node> {
     map(
         terminated(
             separated_pair(
@@ -55,7 +55,7 @@ fn parse_commodity_price(i: &str) -> IResult<&str, Node> {
             opt(newline),
         ),
         |(date, (symbol, expression))| {
-            Node::CommodityPrice(CommodityPrice {
+            Node::DatedPrice(DatedPrice {
                 date,
                 symbol: symbol.into(),
                 expression,
@@ -303,7 +303,7 @@ fn parse_directive(i: &str) -> IResult<&str, Node> {
         parse_tag_declaration,
         parse_include_directive,
         parse_default_commodity,
-        parse_commodity_price,
+        parse_dated_price,
         parse_commodity_declaration,
         parse_automatic_transaction,
     ))(i)

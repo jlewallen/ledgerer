@@ -102,7 +102,7 @@ impl Printer {
 
                 Ok(())
             }
-            Node::CommodityPrice(CommodityPrice {
+            Node::DatedPrice(DatedPrice {
                 date,
                 symbol,
                 expression,
