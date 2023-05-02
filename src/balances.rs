@@ -18,6 +18,8 @@ pub struct Command {
     #[arg(short, long)]
     pub invert: bool,
     #[arg(long)]
+    pub apply_prices: bool,
+    #[arg(long)]
     pub posting_format: bool,
     #[arg(short, long)]
     pub before: Option<String>,
@@ -62,11 +64,17 @@ pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<Ba
         .map_or(Ok(None), |v| v.map(Some))
         .unwrap();
 
-    let before_date = cmd
+    let before_naive_date = cmd
         .before
         .as_ref()
-        .map_or(Ok::<DateTime<Utc>, anyhow::Error>(Utc::now()), |o| {
-            Ok(naive_to_pacific(NaiveDate::parse_from_str(&o, "%m/%d/%Y")?)?.with_timezone(&Utc))
+        // Dislike this Error qualification.
+        .map_or(Ok::<_, anyhow::Error>(None), |o| {
+            Ok(Some(NaiveDate::parse_from_str(&o, "%m/%d/%Y")?))
+        })?;
+
+    let before_date = before_naive_date
+        .map_or(Ok::<DateTime<Utc>, anyhow::Error>(Utc::now()), |nd| {
+            Ok(naive_to_pacific(nd)?.with_timezone(&Utc))
         })?;
 
     let sorted = file
@@ -116,13 +124,31 @@ pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<Ba
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let accounts = calculate_balances(file, cmd)?;
 
+    let prices = file.get_prices()?;
+
     if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
         for key in accounts.keys().sorted() {
             let value = accounts.get(key).unwrap();
             for balance in value.iter() {
-                // Would rather do this conditionally, except SymbolDecimal takes a reference.
                 let inverted = balance.neg();
                 let balance = if cmd.invert { &inverted } else { balance };
+                let balance = if cmd.apply_prices {
+                    match balance {
+                        Balance::Currency {
+                            symbol: _,
+                            value: _,
+                        } => balance.clone(),
+                        Balance::Commodity { symbol, lots } => {
+                            match prices.value_of(symbol, Lot::quantity(lots)) {
+                                Some(value) => Balance::currency("$", value),
+                                None => balance.clone(),
+                            }
+                        }
+                    }
+                } else {
+                    balance.clone()
+                };
+
                 if !balance.is_zero() {
                     if cmd.posting_format {
                         println!("    {:76} {:>30}", key, balance);

@@ -32,6 +32,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                 invert: false,
                 posting_format: false,
                 before: cmd.before.clone(),
+                apply_prices: false,
             },
         )
     };

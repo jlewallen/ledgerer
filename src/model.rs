@@ -539,6 +539,82 @@ impl LedgerFile {
     pub fn sortable_nodes_iter(&self) -> impl Iterator<Item = SortedNode> {
         sortable_nodes(self.nodes_iter())
     }
+
+    pub fn get_prices(&self) -> Result<Prices> {
+        let prices: HashMap<String, Vec<(NaiveDate, BigDecimal)>> = self
+            .recursive_iter()
+            .filter_map(|n| match n {
+                Node::DatedPrice(dp) => Some(dp),
+                _ => None,
+            })
+            .map(|dp| {
+                (
+                    dp.symbol.clone(),
+                    (dp.date, dp.expression.to_decimal().unwrap()),
+                )
+            })
+            .sorted()
+            .fold(HashMap::new(), |mut acc, dp| {
+                match acc.get_mut(&dp.0) {
+                    Some(entry) => entry.push(dp.1),
+                    None => {
+                        acc.insert(dp.0.clone(), vec![dp.1]);
+                    }
+                };
+
+                acc
+            });
+
+        Ok(Prices { prices })
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Prices {
+    prices: HashMap<String, Vec<(NaiveDate, BigDecimal)>>,
+}
+
+impl Prices {
+    pub fn get_prices(&self, date: NaiveDate) -> Self {
+        Self {
+            prices: self
+                .prices
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        v.clone() // TODO
+                            .into_iter()
+                            .take_while(|p| p.0 < date)
+                            .collect_vec(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn get_price(&self, symbol: &str) -> Option<&BigDecimal> {
+        match self.prices.get(symbol) {
+            Some(timeline) => {
+                let mut value = None;
+                for (_, price) in timeline {
+                    value = Some(price);
+                }
+                value
+            }
+            None => None,
+        }
+    }
+
+    pub fn value_of(&self, symbol: &str, quantity: Option<BigDecimal>) -> Option<BigDecimal> {
+        match quantity {
+            Some(quantity) => match self.get_price(symbol) {
+                Some(price) => Some(quantity * price),
+                None => None,
+            },
+            None => None,
+        }
+    }
 }
 
 pub struct SortedNode<'a>(NaiveDate, usize, &'a Node);
@@ -606,6 +682,15 @@ impl Lot {
             date: None,
             quantity,
             price,
+        }
+    }
+
+    pub fn quantity(lots: &Vec<Self>) -> Option<BigDecimal> {
+        let quantity: BigDecimal = lots.iter().map(|l| l.quantity.clone()).sum();
+        if quantity.is_zero() {
+            None
+        } else {
+            Some(quantity)
         }
     }
 
