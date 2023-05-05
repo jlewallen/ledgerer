@@ -30,6 +30,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                 cleared,
                 actual: cmd.actual,
                 invert: false,
+                json: false,
                 posting_format: false,
                 before: cmd.before.clone(),
                 apply_prices: false,

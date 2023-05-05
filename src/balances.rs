@@ -1,10 +1,8 @@
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use clap::Args;
 use regex::Regex;
-use std::collections::{
-    hash_map::{Iter, Keys},
-    HashMap,
-};
+use serde::{ser::SerializeStruct, Serialize};
+use std::collections::{hash_map::Iter, HashMap};
 
 use crate::model::*;
 
@@ -19,6 +17,8 @@ pub struct Command {
     pub invert: bool,
     #[arg(long)]
     pub apply_prices: bool,
+    #[arg(short, long)]
+    pub json: bool,
     #[arg(long)]
     pub posting_format: bool,
     #[arg(short, long)]
@@ -39,6 +39,7 @@ impl BalancesByAccount {
         Self { map }
     }
 
+    /*
     pub fn keys(&self) -> Keys<String, Balances> {
         self.map.keys()
     }
@@ -46,6 +47,7 @@ impl BalancesByAccount {
     pub fn get(&self, name: &str) -> Option<&Balances> {
         self.map.get(name)
     }
+    */
 
     pub fn iter(&self) -> Iter<String, Balances> {
         self.map.iter()
@@ -121,40 +123,72 @@ pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<Ba
     }
 }
 
+struct DisplayBalance {
+    account: String,
+    value: Balance,
+}
+
+impl Serialize for DisplayBalance {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("Balance", 2)?;
+        state.serialize_field("account", &self.account)?;
+        match self.value.value() {
+            Some(value) => state.serialize_field("value", &format!("{}", value))?,
+            None => {}
+        }
+        state.end()
+    }
+}
+
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let accounts = calculate_balances(file, cmd)?;
 
     let prices = file.get_prices()?;
-
-    if let Some(_max_key_len) = accounts.keys().map(|k| k.len()).max() {
-        for key in accounts.keys().sorted() {
-            let value = accounts.get(key).unwrap();
-            for balance in value.iter() {
-                let inverted = balance.neg();
-                let balance = if cmd.invert { &inverted } else { balance };
-                let balance = if cmd.apply_prices {
-                    match balance {
-                        Balance::Currency {
-                            symbol: _,
-                            value: _,
-                        } => balance.clone(),
-                        Balance::Commodity { symbol, lots } => {
-                            match prices.value_of(symbol, Lot::quantity(lots)) {
-                                Some(value) => Balance::currency("$", value),
-                                None => balance.clone(),
+    let balances = accounts
+        .iter()
+        .flat_map(|(key, value)| {
+            value
+                .iter()
+                .map(|balance| {
+                    let inverted = balance.neg();
+                    let balance = if cmd.invert { &inverted } else { balance };
+                    if cmd.apply_prices {
+                        match balance {
+                            Balance::Currency {
+                                symbol: _,
+                                value: _,
+                            } => balance.clone(),
+                            Balance::Commodity { symbol, lots } => {
+                                match prices.value_of(symbol, Lot::quantity(lots)) {
+                                    Some(value) => Balance::currency("$", value),
+                                    None => balance.clone(),
+                                }
                             }
                         }
-                    }
-                } else {
-                    balance.clone()
-                };
-
-                if !balance.is_zero() {
-                    if cmd.posting_format {
-                        println!("    {:76} {:>30}", key, balance);
                     } else {
-                        println!("{:>30} {}", balance, key);
+                        balance.clone()
                     }
+                })
+                .map(|value| DisplayBalance {
+                    account: key.clone(),
+                    value,
+                })
+        })
+        .sorted_unstable_by_key(|row| (row.account.clone(), row.value.to_string()))
+        .collect_vec();
+
+    if cmd.json {
+        println!("{}", serde_json::to_string_pretty(&balances)?)
+    } else {
+        for balance in balances.iter() {
+            if !balance.value.is_zero() {
+                if cmd.posting_format {
+                    println!("    {:76} {:>30}", balance.account, balance.value);
+                } else {
+                    println!("{:>30} {}", balance.value, balance.account);
                 }
             }
         }
