@@ -199,7 +199,7 @@ impl Transaction {
 
             let mut postings = self.postings;
 
-            for mut posting in postings.iter_mut() {
+            for posting in postings.iter_mut() {
                 if posting.expression.is_none() {
                     posting.expression = Some(Expression::Calculated(-total.clone()))
                 }
