@@ -85,7 +85,7 @@ struct MatchedBalance {
 
 impl MatchedBalance {
     fn default_currency_balance(&self) -> Option<&SingleBalance> {
-        self.balances.iter().filter(|b| b.symbol == "$").next()
+        self.balances.iter().find(|b| b.symbol == "$")
     }
 }
 

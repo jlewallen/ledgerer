@@ -25,7 +25,7 @@ pub fn optional_naive_to_pacific(v: &Option<String>) -> Result<Option<DateTime<U
     v.as_ref()
         .map_or(Ok::<Option<DateTime<Utc>>, anyhow::Error>(None), |o| {
             Ok(Some(
-                naive_to_pacific(NaiveDate::parse_from_str(&o, "%m/%d/%Y")?)?.with_timezone(&Utc),
+                naive_to_pacific(NaiveDate::parse_from_str(o, "%m/%d/%Y")?)?.with_timezone(&Utc),
             ))
         })
 }
@@ -135,7 +135,7 @@ impl Printer {
         for node in sort_nodes(
             sortable_nodes(iter)
                 .filter(|sn| match self.before {
-                    Some(before) => naive_to_pacific(sn.date().clone()).unwrap() < before,
+                    Some(before) => naive_to_pacific(*sn.date()).unwrap() < before,
                     None => true,
                 })
                 .filter(|sn| match self.after {
@@ -143,7 +143,7 @@ impl Printer {
                         if *sn.date() == NaiveDate::MIN {
                             true
                         } else {
-                            naive_to_pacific(sn.date().clone()).unwrap() >= after
+                            naive_to_pacific(*sn.date()).unwrap() >= after
                         }
                     }
                     None => true,

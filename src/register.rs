@@ -59,7 +59,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         .filter(|tx| !cmd.cleared || tx.cleared)
         // This also happens in 'print' and it would be nice to avoid this duplication.
         .filter(|tx| match before {
-            Some(before) => naive_to_pacific(tx.date.clone()).unwrap() < before,
+            Some(before) => naive_to_pacific(tx.date).unwrap() < before,
             None => true,
         })
         .filter(|tx| match after {
@@ -67,7 +67,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                 if tx.date == NaiveDate::MIN {
                     true
                 } else {
-                    naive_to_pacific(tx.date.clone()).unwrap() >= after
+                    naive_to_pacific(tx.date).unwrap() >= after
                 }
             }
             None => true,

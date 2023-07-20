@@ -608,10 +608,7 @@ impl Prices {
 
     pub fn value_of(&self, symbol: &str, quantity: Option<BigDecimal>) -> Option<BigDecimal> {
         match quantity {
-            Some(quantity) => match self.get_price(symbol) {
-                Some(price) => Some(quantity * price),
-                None => None,
-            },
+            Some(quantity) => self.get_price(symbol).map(|price| quantity * price),
             None => None,
         }
     }
@@ -685,7 +682,7 @@ impl Lot {
         }
     }
 
-    pub fn quantity(lots: &Vec<Self>) -> Option<BigDecimal> {
+    pub fn quantity(lots: &[Self]) -> Option<BigDecimal> {
         let quantity: BigDecimal = lots.iter().map(|l| l.quantity.clone()).sum();
         if quantity.is_zero() {
             None
@@ -694,7 +691,7 @@ impl Lot {
         }
     }
 
-    pub fn sum(lots: &Vec<Self>) -> Self {
+    pub fn sum(lots: &[Self]) -> Self {
         if lots
             .iter()
             .any(|l| l.price.is_none() || l.price.as_ref().unwrap().is_zero())
@@ -706,7 +703,7 @@ impl Lot {
         if quantity.is_zero() {
             Self {
                 date: None,
-                quantity: quantity,
+                quantity,
                 price: None,
             }
         } else {
@@ -791,9 +788,7 @@ impl Balance {
     pub fn value(&self) -> Option<f32> {
         match self {
             Balance::Currency { symbol: _, value } => value.to_f32(),
-            Balance::Commodity { symbol: _, lots } => {
-                Lot::sum(lots).price.map_or(None, |p| p.to_f32())
-            }
+            Balance::Commodity { symbol: _, lots } => Lot::sum(lots).price.and_then(|p| p.to_f32()),
         }
     }
 }

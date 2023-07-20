@@ -71,7 +71,7 @@ pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<Ba
         .as_ref()
         // Dislike this Error qualification.
         .map_or(Ok::<_, anyhow::Error>(None), |o| {
-            Ok(Some(NaiveDate::parse_from_str(&o, "%m/%d/%Y")?))
+            Ok(Some(NaiveDate::parse_from_str(o, "%m/%d/%Y")?))
         })?;
 
     let before_date = before_naive_date
@@ -135,9 +135,8 @@ impl Serialize for DisplayBalance {
     {
         let mut state = serializer.serialize_struct("Balance", 2)?;
         state.serialize_field("account", &self.account)?;
-        match self.value.value() {
-            Some(value) => state.serialize_field("value", &format!("{}", value))?,
-            None => {}
+        if let Some(value) = self.value.value() {
+            state.serialize_field("value", &format!("{}", value))?;
         }
         state.end()
     }
