@@ -14,28 +14,41 @@ pub struct Command {
     pub before: Option<String>,
     #[arg(short, long)]
     pub after: Option<String>,
+    #[arg(short, long)]
+    pub cumulative: bool,
+    #[arg(long)]
+    pub width: Option<u16>,
 }
 
 struct Format {
     leading_width: usize,
     name_width: usize,
     value_width: usize,
+    cumulative_width: usize,
 }
 
 impl Format {
-    pub fn new() -> Self {
+    pub fn new(cmd: &Command) -> Self {
         let fixed_spaces = 2;
-        match terminal_size() {
-            Some((Width(w), _)) => Self {
-                leading_width: 80,
-                name_width: 60,
-                value_width: w as usize - fixed_spaces - 80 - 60,
-            },
-            None => Self {
-                leading_width: 80,
-                name_width: 60,
-                value_width: 10,
-            },
+
+        let maximum_width = match (cmd.width, terminal_size()) {
+            (Some(w), _) | (None, Some((Width(w), _))) => w as usize,
+            _ => 160,
+        };
+
+        assert!(maximum_width >= 40);
+
+        let value_width = 10;
+        let cumulative_width = if cmd.cumulative { value_width } else { 0 };
+        let after_values = maximum_width - value_width - cumulative_width - fixed_spaces;
+        let name_width = after_values / 2;
+        let leading_width = after_values / 2;
+
+        Self {
+            leading_width,
+            name_width,
+            value_width,
+            cumulative_width,
         }
     }
 }
@@ -48,12 +61,11 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         .pattern
         .clone()
         .map(|p| Regex::new(&p))
-        // YES! https://users.rust-lang.org/t/convenience-method-for-flipping-option-result-to-result-option/13695/10
-        // x.map_or(Ok(None), |v| v.map(Some))
         .map_or(Ok(None), |v| v.map(Some))
         .unwrap();
 
-    let format = Format::new();
+    let mut cumulative = BigDecimal::zero();
+    let format = Format::new(cmd);
     for tx in file
         .iter_transactions_in_order()
         .filter(|tx| !cmd.cleared || tx.cleared)
@@ -79,18 +91,39 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                 .as_ref()
                 .map_or(true, |c| c.is_match(posting.account.as_str()))
             {
-                println!(
+                let formatted = match &posting.expression {
+                    Some(expression) => format!("{}", expression),
+                    _ => "".to_owned(),
+                };
+
+                print!(
                     "{:leading_width$} {:name_width$} {:>value_width$}",
                     prefix.as_str().truncate_ellipse(format.leading_width - 3),
                     posting.account,
-                    match &posting.expression {
-                        Some(expression) => format!("{}", expression),
-                        _ => "".to_owned(),
-                    },
+                    formatted,
                     leading_width = format.leading_width,
                     name_width = format.name_width,
                     value_width = format.value_width,
                 );
+
+                let value = match &posting.expression {
+                    Some(expression) => expression.to_decimal(),
+                    _ => None,
+                };
+
+                if format.cumulative_width > 0 {
+                    if let Some(value) = value {
+                        cumulative += value;
+                        print!(
+                            "{:>cumulative_width$}",
+                            cumulative,
+                            cumulative_width = format.cumulative_width
+                        );
+                    }
+                }
+
+                println!();
+
                 prefix = "".to_owned();
             }
         }
