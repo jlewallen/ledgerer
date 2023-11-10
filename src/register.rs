@@ -116,7 +116,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                         cumulative += value;
                         print!(
                             "{:>cumulative_width$}",
-                            cumulative,
+                            cumulative.round(2),
                             cumulative_width = format.cumulative_width
                         );
                     }
