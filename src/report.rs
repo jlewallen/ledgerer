@@ -169,7 +169,8 @@ pub fn lpad(value: &Value, args: &HashMap<String, Value>) -> tera::Result<Value>
 pub fn meter(value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Value> {
     let value = try_get_value!("meter", "value", Vec<MatchedBalance>, value);
     if value.len() != 1 {
-        return Err(tera::Error::msg("Expected a single balance in 'meter'"));
+        // return Err(tera::Error::msg("Expected a single balance in 'meter'"));
+        return Ok(to_value("")?);
     }
 
     let balances = value.into_iter().next().unwrap();
