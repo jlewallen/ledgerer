@@ -148,16 +148,21 @@ fn basic_commodity(i: &str) -> IResult<&str, Expression> {
         tuple((
             numeric_literal,
             preceded(linespace1, symbol),
-            opt(preceded(
+            opt(tuple((
                 tuple((linespace1, tag("@"), linespace1)),
                 numeric_literal,
-            )),
+                opt(preceded(
+                    linespace1,
+                    delimited(tag("["), date_string, tag("]")),
+                )),
+            ))),
         )),
-        |(quantity, symbol, price)| {
+        |(quantity, symbol, details)| {
             Expression::Commodity(CommodityExpression {
                 quantity,
                 symbol: symbol.into(),
-                price,
+                price: details.as_ref().map(|d| d.1.clone()),
+                date: details.as_ref().map(|d| d.2).flatten(),
             })
         },
     )(i)

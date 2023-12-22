@@ -7,6 +7,7 @@ use tracing::{debug, info};
 
 use crate::{
     balances::{self, calculate_balances, BalancesByAccount},
+    lots::Lot,
     model::*,
 };
 
@@ -22,6 +23,14 @@ pub struct Command {
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
+    let before_naive_date = cmd
+        .before
+        .as_ref()
+        // Dislike this Error qualification.
+        .map_or(Ok::<_, anyhow::Error>(None), |o| {
+            Ok(Some(NaiveDate::parse_from_str(o, "%m/%d/%Y")?))
+        })?;
+
     let calculate = |cleared| {
         calculate_balances(
             file,
@@ -38,6 +47,38 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         )
     };
 
+    let get_lots = || {
+        let mut lots: Vec<crate::lots::Lot> = file
+            .iter_transactions()
+            .filter(|tx| {
+                before_naive_date
+                    .map(|before| tx.date < before)
+                    .unwrap_or(true)
+            })
+            .flat_map(|tx| {
+                tx.postings.iter().filter_map(|p| match &p.expression {
+                    Some(crate::model::Expression::Commodity(CommodityExpression {
+                        quantity,
+                        symbol,
+                        price,
+                        date,
+                    })) => Some(crate::lots::Lot {
+                        date: date.unwrap_or(tx.date),
+                        symbol: symbol.to_owned(),
+                        quantity: quantity.to_decimal(),
+                        price: price.as_ref().map(|e| e.to_decimal()),
+                    }),
+                    _ => None,
+                })
+            })
+            .collect();
+
+        lots.sort_unstable_by_key(|lot| (lot.symbol.to_owned(), lot.date));
+
+        lots
+    };
+
+    let lots = get_lots();
     let everything = calculate(false)?;
     let cleared = calculate(true)?;
 
@@ -47,6 +88,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     tera.register_filter("lpad", lpad);
     tera.register_filter("meter", meter);
     tera.register_function("balances", balances_matching(everything, cleared));
+    tera.register_function("lots", lots_matching(lots));
 
     if let Some(include) = &cmd.include {
         info!("including {:?}", include);
@@ -87,6 +129,33 @@ impl MatchedBalance {
     fn default_currency_balance(&self) -> Option<&SingleBalance> {
         self.balances.iter().find(|b| b.symbol == "$")
     }
+}
+
+#[derive(Debug, Serialize)]
+struct LotForTemplate {
+    pub account: String,
+    pub date: String,
+    pub symbol: String,
+    pub quantity: String,
+    pub price: Option<String>,
+}
+
+fn lots_matching(lots: Vec<Lot>) -> impl Function {
+    Box::new(
+        move |_args: &HashMap<String, Value>| -> tera::Result<Value> {
+            Ok(to_value(
+                lots.iter()
+                    .map(|l| LotForTemplate {
+                        account: format!("assets:fidelity:roth:stocks:{}", l.symbol.to_lowercase()),
+                        date: l.date.format("%Y/%m/%d").to_string(),
+                        symbol: l.symbol.to_owned(),
+                        quantity: format!("{}", l.quantity),
+                        price: l.price.as_ref().map(|p| format!("{}", p)),
+                    })
+                    .collect_vec(),
+            )?)
+        },
+    )
 }
 
 fn balances_matching(everything: BalancesByAccount, cleared: BalancesByAccount) -> impl Function {

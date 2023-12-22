@@ -25,8 +25,9 @@ pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> 
                     quantity,
                     symbol,
                     price,
+                    date,
                 })) => Some(Lot {
-                    date: tx.date,
+                    date: date.unwrap_or(tx.date),
                     symbol: symbol.to_owned(),
                     quantity: quantity.to_decimal(),
                     price: price.as_ref().map(|e| e.to_decimal()),

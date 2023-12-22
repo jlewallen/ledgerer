@@ -40,7 +40,7 @@ impl std::fmt::Display for AccountPath {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Numeric {
     Negative(String, Option<String>),
     Positive(String, Option<String>),
@@ -79,6 +79,7 @@ pub struct CommodityExpression {
     pub quantity: Numeric,
     pub symbol: String,
     pub price: Option<Numeric>,
+    pub date: Option<NaiveDate>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -125,6 +126,7 @@ impl std::fmt::Display for Expression {
                     quantity,
                     symbol,
                     price: Some(price),
+                    date: None,
                 } => f.pad(&format!(
                     "{} {} @ {}",
                     quantity.to_text_format(""),
@@ -135,7 +137,26 @@ impl std::fmt::Display for Expression {
                     quantity,
                     symbol,
                     price: None,
+                    date: None,
                 } => f.pad(&format!("{} {}", quantity.to_text_format(""), symbol)),
+                CommodityExpression {
+                    quantity,
+                    symbol,
+                    price: Some(price),
+                    date: Some(date),
+                } => f.pad(&format!(
+                    "{} {} @ {} [{}]",
+                    quantity.to_text_format(""),
+                    symbol,
+                    price.to_text_format("$"),
+                    date.format("%Y/%m/%d").to_string()
+                )),
+                CommodityExpression {
+                    quantity: _,
+                    symbol: _,
+                    price: None,
+                    date: Some(_),
+                } => unimplemented!(),
             },
             Expression::Factor(n) => match &n {
                 (true, i) => f.pad(&format!("(-{})", i)),
@@ -667,10 +688,9 @@ fn include_glob(path: &str) -> Result<Vec<Node>> {
 
 #[derive(Debug, Clone)]
 pub struct Lot {
-    #[allow(dead_code)]
-    date: Option<NaiveDate>,
-    quantity: BigDecimal,
-    price: Option<BigDecimal>,
+    pub date: Option<NaiveDate>,
+    pub quantity: BigDecimal,
+    pub price: Option<BigDecimal>,
 }
 
 impl Lot {
