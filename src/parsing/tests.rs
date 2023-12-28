@@ -99,6 +99,7 @@ fn test_parse_transaction_below_comment() -> Result<()> {
                 payee: "withdrawl".into(),
                 cleared: false,
                 mid: None,
+                origin: Some(Origin::File),
                 notes: Vec::new(),
                 postings: vec![
                     Posting {
@@ -139,6 +140,7 @@ fn test_parse_transaction_basic_no_newline() -> Result<()> {
             payee: "withdrawl".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: Vec::new(),
             postings: vec![
                 Posting {
@@ -180,6 +182,7 @@ fn test_parse_transaction_basic() -> Result<()> {
             payee: "withdrawl".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: Vec::new(),
             postings: vec![
                 Posting {
@@ -226,6 +229,7 @@ fn test_parse_transaction_basic_twice() -> Result<()> {
                 payee: "withdrawl 1".into(),
                 cleared: false,
                 mid: None,
+                origin: Some(Origin::File),
                 notes: Vec::new(),
                 postings: vec![
                     Posting {
@@ -252,6 +256,7 @@ fn test_parse_transaction_basic_twice() -> Result<()> {
                 payee: "withdrawl 2".into(),
                 cleared: false,
                 mid: None,
+                origin: Some(Origin::File),
                 notes: Vec::new(),
                 postings: vec![
                     Posting {
@@ -294,6 +299,7 @@ fn test_parse_transaction_basic_with_whitespace_after_posting() -> Result<()> {
             payee: "income".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: Vec::new(),
             postings: vec![
                 Posting {
@@ -337,6 +343,7 @@ fn test_parse_transaction_basic_with_virtual() -> Result<()> {
             payee: "income".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: Vec::new(),
             postings: vec![
                 Posting {
@@ -395,6 +402,7 @@ fn test_parse_transaction_basic_alternative_sign_location() -> Result<()> {
             notes: Vec::new(),
             cleared: true,
             mid: None,
+            origin: Some(Origin::File),
             postings: vec![
                 Posting {
                     account: AccountPath::Real("assets:cash".into()),
@@ -436,6 +444,7 @@ fn test_parse_transaction_basic_cleared() -> Result<()> {
             notes: Vec::new(),
             cleared: true,
             mid: None,
+            origin: Some(Origin::File),
             postings: vec![
                 Posting {
                     account: AccountPath::Real("assets:cash".into()),
@@ -476,6 +485,7 @@ fn test_parse_transaction_with_catchall_posting_last() -> Result<()> {
             payee: "withdrawl".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: Vec::new(),
             postings: vec![
                 Posting {
@@ -514,6 +524,7 @@ fn test_parse_transaction_with_catchall_posting_first() -> Result<()> {
             payee: "withdrawl".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: Vec::new(),
             postings: vec![
                 Posting {
@@ -553,6 +564,7 @@ fn test_parse_transaction_with_note() -> Result<()> {
             payee: "withdrawl".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: vec!["hello-world".into()],
             postings: vec![
                 Posting {
@@ -594,6 +606,7 @@ fn test_parse_transaction_with_posting_with_note() -> Result<()> {
             payee: "withdrawl".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: vec![],
             postings: vec![
                 Posting {
@@ -721,6 +734,7 @@ fn test_parse_transaction_with_mixed_commodities() -> Result<()> {
             payee: "opening".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: vec![],
             postings: vec![
                 Posting {
@@ -770,6 +784,7 @@ fn test_parse_transaction_with_priced_and_dated_commodity() -> Result<()> {
             payee: "opening".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: vec![],
             postings: vec![
                 Posting {
@@ -819,6 +834,7 @@ fn test_parse_transaction_with_priced_commodity() -> Result<()> {
             payee: "opening".into(),
             cleared: false,
             mid: None,
+            origin: Some(Origin::File),
             notes: vec![],
             postings: vec![
                 Posting {

@@ -175,6 +175,13 @@ pub struct Transaction {
     pub notes: Vec<String>,
     pub postings: Vec<Posting>,
     pub mid: Option<String>,
+    pub origin: Option<Origin>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Origin {
+    Automatic,
+    File,
 }
 
 impl Serialize for Transaction {
@@ -233,6 +240,7 @@ impl Transaction {
                 mid: self.mid,
                 notes: self.notes,
                 postings,
+                origin: None,
             })
         } else {
             let total: BigDecimal = self
@@ -264,6 +272,7 @@ impl Transaction {
             notes: self.notes,
             postings: self.postings,
             mid: Some(mid),
+            origin: self.origin,
         }
     }
 }
@@ -329,6 +338,7 @@ impl AutomaticTransaction {
                     cleared: tx.cleared,
                     notes: self.notes.clone(),
                     postings: self.postings_with_value(value),
+                    origin: Some(Origin::Automatic),
                     mid: None,
                 },
                 None => todo!(),

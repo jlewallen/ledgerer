@@ -108,9 +108,10 @@ fn parse_transaction(i: &str) -> IResult<&str, Node> {
                 date,
                 payee: payee.to_string(),
                 cleared: cleared.is_some(),
-                mid: None,
                 notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
                 postings,
+                origin: Some(Origin::File),
+                mid: None,
             })
         },
     )(i)
