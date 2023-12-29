@@ -109,9 +109,11 @@ fn parse_transaction(i: &str) -> IResult<&str, Node> {
                 payee: payee.to_string(),
                 cleared: cleared.is_some(),
                 notes: notes.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+                refs: Vec::default(),
                 postings,
                 origin: Some(Origin::File),
                 mid: None,
+                order: None,
             })
         },
     )(i)
@@ -163,7 +165,7 @@ fn basic_commodity(i: &str) -> IResult<&str, Expression> {
                 quantity,
                 symbol: symbol.into(),
                 price: details.as_ref().map(|d| d.1.clone()),
-                date: details.as_ref().map(|d| d.2).flatten(),
+                date: details.as_ref().and_then(|d| d.2),
             })
         },
     )(i)

@@ -15,6 +15,7 @@ pub struct Command {
     pub before: Option<String>,
 }
 
+#[derive(Default)]
 pub struct Printer {
     pub recursive: bool,
     pub after: Option<DateTime<Utc>>,
@@ -29,6 +30,8 @@ pub fn optional_naive_to_pacific(v: &Option<String>) -> Result<Option<DateTime<U
             ))
         })
 }
+
+
 
 impl Printer {
     pub fn from(cmd: &Command) -> Result<Self> {
@@ -127,7 +130,7 @@ impl Printer {
         }
     }
 
-    fn write_nodes<'a>(
+    pub fn write_nodes<'a>(
         &self,
         w: &mut impl Write,
         iter: impl Iterator<Item = &'a Node>,

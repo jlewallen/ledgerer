@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use bigdecimal::Signed;
 #[allow(unused_imports)]
 use bigdecimal::ToPrimitive;
 use serde::{ser::SerializeStruct, Serialize};
@@ -6,6 +7,7 @@ use std::{
     collections::HashMap,
     ops::Neg,
     path::{Path, PathBuf},
+    rc::Rc,
     str::FromStr,
     sync::atomic::AtomicU64,
     time::Instant,
@@ -17,16 +19,32 @@ pub use bigdecimal::{BigDecimal, Zero};
 pub use chrono::NaiveDate;
 pub use itertools::Itertools;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum AccountPath {
     Real(String),
     Virtual(String),
+}
+
+impl PartialEq for AccountPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
 }
 
 impl AccountPath {
     pub fn as_str(&self) -> &str {
         match self {
             AccountPath::Real(p) | AccountPath::Virtual(p) => p,
+        }
+    }
+}
+
+impl From<&str> for AccountPath {
+    fn from(value: &str) -> Self {
+        if value.starts_with("allocations") || value.ends_with("reserved") {
+            Self::Virtual(value.to_owned())
+        } else {
+            Self::Real(value.to_owned())
         }
     }
 }
@@ -44,6 +62,7 @@ impl std::fmt::Display for AccountPath {
 pub enum Numeric {
     Negative(String, Option<String>),
     Positive(String, Option<String>),
+    Decimal(BigDecimal),
 }
 
 impl Numeric {
@@ -61,6 +80,7 @@ impl Numeric {
             Numeric::Positive(a, None) => {
                 BigDecimal::from_str(&a.to_string()).expect("Malformed Numeric")
             }
+            Numeric::Decimal(d) => d.clone(),
         }
     }
 
@@ -70,11 +90,18 @@ impl Numeric {
             Numeric::Positive(a, Some(b)) => format!("{}{}.{:02}", symbol, a, b),
             Numeric::Negative(a, None) => format!("-{}{}", symbol, a),
             Numeric::Positive(a, None) => format!("{}{}", symbol, a),
+            Numeric::Decimal(d) => {
+                if d.is_negative() {
+                    format!("-{}{}", symbol, d.abs())
+                } else {
+                    format!("{}{}", symbol, d)
+                }
+            }
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CommodityExpression {
     pub quantity: Numeric,
     pub symbol: String,
@@ -82,7 +109,7 @@ pub struct CommodityExpression {
     pub date: Option<NaiveDate>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     Literal(Numeric),
     Commodity(CommodityExpression),
@@ -149,7 +176,7 @@ impl std::fmt::Display for Expression {
                     quantity.to_text_format(""),
                     symbol,
                     price.to_text_format("$"),
-                    date.format("%Y/%m/%d").to_string()
+                    date.format("%Y/%m/%d")
                 )),
                 CommodityExpression {
                     quantity: _,
@@ -167,21 +194,24 @@ impl std::fmt::Display for Expression {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Transaction {
     pub date: NaiveDate,
     pub payee: String,
     pub cleared: bool,
-    pub notes: Vec<String>,
     pub postings: Vec<Posting>,
+    pub notes: Vec<String>,
     pub mid: Option<String>,
+    pub order: Option<u64>, // Torn on this, need a way to maintain "file order"
     pub origin: Option<Origin>,
+    pub refs: Vec<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Origin {
-    Automatic,
     File,
+    Automatic,
+    Generated,
 }
 
 impl Serialize for Transaction {
@@ -205,14 +235,50 @@ impl Transaction {
         !self.postings.iter().any(|p| p.has_value().is_none())
     }
 
+    pub fn magnitude(&self) -> Option<BigDecimal> {
+        if self.is_simple() {
+            self.postings
+                .iter()
+                .flat_map(|p| p.has_value().map(|d| d.abs()))
+                .next()
+        } else {
+            None
+        }
+    }
+
+    pub fn specific_order(&self) -> Option<usize> {
+        self.notes
+            .iter()
+            .flat_map(|n| match n.split_once(":order:") {
+                Some((_, order)) => order.parse().ok(),
+                None => None,
+            })
+            .next()
+    }
+
     pub fn has_posting_for(&self, name: &str) -> bool {
         self.postings.iter().any(|p| p.account.as_str() == name)
+    }
+
+    pub fn has_posting_for_re(&self, re: &regex::Regex) -> bool {
+        self.postings
+            .iter()
+            .any(|p| re.is_match(p.account.as_str()))
     }
 
     pub fn iter_postings_for<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &Posting> + 'a {
         self.postings
             .iter()
             .filter(move |p| p.account.as_str() == name)
+    }
+
+    pub fn iter_postings_for_re<'a, 'b: 'a>(
+        &'a self,
+        re: &'b regex::Regex,
+    ) -> impl Iterator<Item = &Posting> + 'a {
+        self.postings
+            .iter()
+            .filter(move |p| re.is_match(p.account.as_str()))
     }
 
     pub(crate) fn into_balanced(self) -> Result<Self> {
@@ -238,9 +304,11 @@ impl Transaction {
                 payee: self.payee,
                 cleared: self.cleared,
                 mid: self.mid,
+                order: self.order,
+                origin: self.origin,
                 notes: self.notes,
+                refs: self.refs,
                 postings,
-                origin: None,
             })
         } else {
             let total: BigDecimal = self
@@ -264,7 +332,7 @@ impl Transaction {
         }
     }
 
-    pub(crate) fn into_with_mid(self, mid: String) -> Self {
+    fn into_with_mid(self, mid: String) -> Self {
         Self {
             date: self.date,
             payee: self.payee,
@@ -272,12 +340,42 @@ impl Transaction {
             notes: self.notes,
             postings: self.postings,
             mid: Some(mid),
+            order: self.order,
             origin: self.origin,
+            refs: self.refs,
+        }
+    }
+
+    fn into_with_order(self, order: u64) -> Self {
+        Self {
+            date: self.date,
+            payee: self.payee,
+            cleared: self.cleared,
+            notes: self.notes,
+            postings: self.postings,
+            mid: self.mid,
+            order: Some(order),
+            origin: self.origin,
+            refs: self.refs,
+        }
+    }
+
+    fn into_with_origin(self, origin: Option<Origin>) -> Self {
+        Self {
+            date: self.date,
+            payee: self.payee,
+            cleared: self.cleared,
+            notes: self.notes,
+            postings: self.postings,
+            mid: self.mid,
+            order: self.order,
+            origin: origin.or(self.origin),
+            refs: self.refs,
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Posting {
     pub account: AccountPath,
     pub expression: Option<Expression>,
@@ -302,6 +400,14 @@ impl Posting {
 
     pub fn into_balance(&self) -> Option<Balance> {
         self.expression.as_ref().and_then(|e| e.into_balance())
+    }
+
+    pub(crate) fn only_positive(&self) -> Option<BigDecimal> {
+        self.has_value().filter(|v| v.is_positive())
+    }
+
+    pub(crate) fn only_negative(&self) -> Option<BigDecimal> {
+        self.has_value().filter(|v| v.is_negative())
     }
 }
 
@@ -337,9 +443,11 @@ impl AutomaticTransaction {
                     payee: tx.payee.clone(),
                     cleared: tx.cleared,
                     notes: self.notes.clone(),
+                    refs: Vec::default(),
                     postings: self.postings_with_value(value),
                     origin: Some(Origin::Automatic),
                     mid: None,
+                    order: None,
                 },
                 None => todo!(),
             })
@@ -423,16 +531,22 @@ pub struct LedgerFile {
 }
 
 impl LedgerFile {
+    pub fn new(path: PathBuf, nodes: Vec<Node>) -> Self {
+        Self { path, nodes }
+    }
+
     pub fn parse(path: &Path) -> Result<Self> {
         info!("parsing {:?}", path);
 
         let data = std::fs::read_to_string(path)?;
-        let nodes = crate::parsing::parse_str(&data)?;
 
-        Ok(LedgerFile {
-            path: path.to_owned(),
-            nodes,
-        })
+        Self::parse_text(data, path.to_owned())
+    }
+
+    pub fn parse_text(text: String, path: PathBuf) -> Result<Self> {
+        let nodes = crate::parsing::parse_str(&text)?;
+
+        Ok(LedgerFile { path, nodes })
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -486,7 +600,7 @@ impl LedgerFile {
         })
     }
 
-    pub fn preprocess(self) -> Result<LedgerFile> {
+    pub fn preprocess(self, order: Rc<AtomicU64>) -> Result<LedgerFile> {
         debug!("preprocessing {:?}", self.path);
 
         let relative = self
@@ -502,14 +616,25 @@ impl LedgerFile {
             .map_or(Err(anyhow!("Expected extension on path")), Ok)?
             .to_ascii_uppercase();
 
+        // TODO HACK
+        let origin = if name == "LALLOC" {
+            Some(Origin::Generated)
+        } else {
+            None
+        };
+
         let mut new_mid = mid_factory(&name);
+        let our_order = order.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         let nodes = self
             .nodes
             .into_iter()
             .map(|node| match node {
                 Node::Transaction(tx) => Ok(Node::Transaction(
-                    tx.into_with_mid(new_mid()).into_balanced()?,
+                    tx.into_with_mid(new_mid())
+                        .into_with_order(our_order)
+                        .into_with_origin(origin.clone())
+                        .into_balanced()?,
                 )),
                 Node::Include(include_path_or_glob) => Ok(Node::Included(
                     include_path_or_glob.clone(),
@@ -518,6 +643,7 @@ impl LedgerFile {
                             .join(&include_path_or_glob)
                             .to_str()
                             .ok_or(anyhow!("Unfriendly path"))?,
+                        order.clone(),
                     )?,
                 )),
                 _ => Ok(node),
@@ -532,7 +658,7 @@ impl LedgerFile {
 
     pub fn iter_transactions_in_order(&self) -> impl Iterator<Item = &Transaction> {
         let mut txs: Vec<&Transaction> = self.iter_transactions().collect();
-        txs.sort_unstable_by_key(|i| (i.date, &i.payee));
+        txs.sort_unstable_by_key(|i| (i.date, i.order, i.specific_order(), &i.payee));
         txs.into_iter()
     }
 
@@ -681,11 +807,11 @@ pub fn sort_nodes<'a>(i: impl Iterator<Item = SortedNode<'a>>) -> impl Iterator<
     sortable.into_iter().map(|i| i.2)
 }
 
-fn include_glob(path: &str) -> Result<Vec<Node>> {
+fn include_glob(path: &str, order: Rc<AtomicU64>) -> Result<Vec<Node>> {
     use glob::glob;
 
     let files = glob(path)?
-        .map(|entry| LedgerFile::parse(&entry?)?.preprocess())
+        .map(|entry| LedgerFile::parse(&entry?)?.preprocess(order.clone()))
         .collect::<Result<Vec<_>>>()?;
 
     let nodes = files
