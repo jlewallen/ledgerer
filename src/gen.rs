@@ -285,15 +285,9 @@ impl Finances {
             Operation::AllocatePaycheck(_, _) => true,
             Operation::RefundedToAvailable(_) => true,
             Operation::EnvelopeWithdrawal(_) => true,
-            Operation::CoverSpending(spending) => self
-                .available
-                .cover(spending, self.today.as_ref().unwrap())
-                .is_some(),
-            Operation::CoverEmergency(spending) => self
-                .available
-                .cover(spending, self.today.as_ref().unwrap())
-                .is_some(),
-            Operation::Scheduled(spending) => self
+            Operation::CoverSpending(spending)
+            | Operation::CoverEmergency(spending)
+            | Operation::Scheduled(spending) => self
                 .available
                 .cover(spending, self.today.as_ref().unwrap())
                 .is_some(),
@@ -762,9 +756,11 @@ impl<'t> Transactions<'t> {
     ) -> Result<Transaction> {
         Ok(Transaction {
             date: self.tx.date,
-            payee: format!("{} `{}`", description, self.tx.payee),
+            payee: match self.tx.mid.as_ref() {
+                Some(mid) => format!("{} `{}` #{}#", description, self.tx.payee, mid),
+                None => format!("{} `{}`", description, self.tx.payee),
+            },
             cleared: true,
-            notes: Vec::default(),
             postings: postings
                 .into_iter()
                 .map(|(account, value)| Posting {
@@ -778,9 +774,11 @@ impl<'t> Transactions<'t> {
                     note: None,
                 }))
                 .collect_vec(),
+            notes: Vec::default(),
             mid: None,
             order: None,
             origin: Some(Origin::Generated),
+            refs: Vec::default(),
         }
         .into_balanced()?)
     }

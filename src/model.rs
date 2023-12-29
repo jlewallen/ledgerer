@@ -199,11 +199,12 @@ pub struct Transaction {
     pub date: NaiveDate,
     pub payee: String,
     pub cleared: bool,
-    pub notes: Vec<String>,
     pub postings: Vec<Posting>,
+    pub notes: Vec<String>,
     pub mid: Option<String>,
     pub order: Option<u64>, // Torn on this, need a way to maintain "file order"
     pub origin: Option<Origin>,
+    pub refs: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -296,6 +297,7 @@ impl Transaction {
                 order: self.order,
                 origin: self.origin,
                 notes: self.notes,
+                refs: self.refs,
                 postings,
             })
         } else {
@@ -330,6 +332,7 @@ impl Transaction {
             mid: Some(mid),
             order: self.order,
             origin: self.origin,
+            refs: self.refs,
         }
     }
 
@@ -343,6 +346,7 @@ impl Transaction {
             mid: self.mid,
             order: Some(order),
             origin: self.origin,
+            refs: self.refs,
         }
     }
 
@@ -356,6 +360,7 @@ impl Transaction {
             mid: self.mid,
             order: self.order,
             origin: origin.or(self.origin),
+            refs: self.refs,
         }
     }
 }
@@ -428,6 +433,7 @@ impl AutomaticTransaction {
                     payee: tx.payee.clone(),
                     cleared: tx.cleared,
                     notes: self.notes.clone(),
+                    refs: Vec::default(),
                     postings: self.postings_with_value(value),
                     origin: Some(Origin::Automatic),
                     mid: None,

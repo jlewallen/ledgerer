@@ -131,16 +131,17 @@ impl AllocatedPay {
             date: self.date.clone(),
             payee: "income allocation".to_owned(),
             cleared: true,
-            notes: vec![],
+            mid: None,
+            order: None,
+            origin: Some(Origin::Generated),
+            notes: Vec::default(),
+            refs: Vec::default(),
             postings: self
                 .allocated
                 .iter()
                 .map(|alloc| alloc.posting(cycle))
                 .chain(vec![available, reserve])
                 .collect_vec(),
-            mid: None,
-            order: None,
-            origin: Some(Origin::Generated),
         }
         .into_balanced()?])
     }
