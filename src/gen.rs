@@ -36,20 +36,20 @@ impl Spending {
             .has_posting_for("allocations:checking:savings:emergency")
     }
 
-    fn available(&self, total: BigDecimal, names: &Names) -> Transaction {
-        Transactions::new(names, &self.original)
+    fn available(&self, date: NaiveDate, total: BigDecimal, names: &Names) -> Transaction {
+        Transactions::new(date, names, &self.original)
             .make_cover_from_available([(self.envelope.clone(), total)].into_iter())
             .unwrap()
     }
 
-    fn emergency(&self, total: BigDecimal, names: &Names) -> Transaction {
-        Transactions::new(names, &self.original)
+    fn emergency(&self, date: NaiveDate, total: BigDecimal, names: &Names) -> Transaction {
+        Transactions::new(date, names, &self.original)
             .make_cover_from_emergency([(self.envelope.clone(), total)].into_iter())
             .unwrap()
     }
 
-    fn early(&self, total: BigDecimal, names: &Names) -> Transaction {
-        Transactions::new(names, &self.original)
+    fn early(&self, date: NaiveDate, total: BigDecimal, names: &Names) -> Transaction {
+        Transactions::new(date, names, &self.original)
             .make_cover_from_early([(self.envelope.clone(), total)].into_iter())
             .unwrap()
     }
@@ -185,7 +185,7 @@ impl Available {
                 } else if self.early.is_positive() {
                     let taking = std::cmp::min(remaining.clone(), self.early.clone());
                     (
-                        Some(spending.early(taking.clone(), &self.names)),
+                        Some(spending.early(today.clone(), taking.clone(), &self.names)),
                         remaining - taking,
                     )
                 } else {
@@ -198,7 +198,7 @@ impl Available {
         let (available, remaining) = if remaining.is_positive() && self.available.is_positive() {
             let taking = std::cmp::min(remaining.clone(), self.available.clone());
             (
-                Some(spending.available(taking.clone(), &self.names)),
+                Some(spending.available(today.clone(), taking.clone(), &self.names)),
                 remaining - taking,
             )
         } else {
@@ -209,7 +209,7 @@ impl Available {
             if remaining.is_positive() && self.emergency.is_positive() && emergency {
                 let taking = std::cmp::min(remaining.clone(), self.emergency.clone());
                 (
-                    Some(spending.emergency(taking.clone(), &self.names)),
+                    Some(spending.emergency(today.clone(), taking.clone(), &self.names)),
                     remaining - taking,
                 )
             } else {
@@ -532,7 +532,7 @@ impl Operator for RefundMoney {
             Ok(Vec::default())
         } else {
             Ok(vec![Operation::RefundedToAvailable(
-                Transactions::new(&self.names, tx).make_refund(refunded.into_iter())?,
+                Transactions::new(tx.date, &self.names, tx).make_refund(refunded.into_iter())?,
             )])
         }
     }
@@ -557,7 +557,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
             .sum();
 
         let envelope: AccountPath = self.config.name.as_str().into();
-        let envelope_withdrawal = Transactions::new(&self.names, tx)
+        let envelope_withdrawal = Transactions::new(tx.date, &self.names, tx)
             .make_envelope_withdrawal(vec![(envelope.clone(), total.clone())].into_iter())?;
 
         if total.is_positive() {
@@ -573,7 +573,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
                 Operation::CoverSpending(spending),
             ])
         } else {
-            let refund = Transactions::new(&self.names, tx)
+            let refund = Transactions::new(tx.date, &self.names, tx)
                 .make_refund(vec![(envelope.clone(), -total)].into_iter())?;
 
             Ok(vec![
@@ -732,13 +732,14 @@ impl Matchers {
 }
 
 struct Transactions<'t> {
+    date: NaiveDate,
     names: &'t Names,
     tx: &'t Transaction,
 }
 
 impl<'t> Transactions<'t> {
-    fn new(names: &'t Names, tx: &'t Transaction) -> Self {
-        Self { names, tx }
+    fn new(date: NaiveDate, names: &'t Names, tx: &'t Transaction) -> Self {
+        Self { date, names, tx }
     }
 
     fn make(
@@ -748,7 +749,7 @@ impl<'t> Transactions<'t> {
         postings: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
         Transaction {
-            date: self.tx.date,
+            date: self.date,
             payee: match self.tx.mid.as_ref() {
                 Some(mid) => format!("{} `{}` #{}#", description, self.tx.payee, mid),
                 None => format!("{} `{}`", description, self.tx.payee),
