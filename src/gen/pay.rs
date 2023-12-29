@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use crate::model::{AccountPath, Expression, LedgerFile, Numeric, Origin, Posting, Transaction};
 
-use super::{TaxRule, Taxes};
+use super::{config::Names, TaxRule, Taxes};
 
 #[derive(Debug)]
 struct Allocated {
@@ -166,14 +166,14 @@ impl Paycheck {
         self.total.clone() - self.allocated.total(cycle)
     }
 
-    pub fn transactions(&self, cycle: Cycle) -> Result<Vec<Transaction>> {
+    pub fn transactions(&self, cycle: Cycle, names: &Names) -> Result<Vec<Transaction>> {
         let reserve = Posting {
-            account: "assets:checking:reserved".into(), // TODO Names
+            account: names.reserved.as_str().into(),
             expression: Some(Expression::Literal(Numeric::Decimal(-self.total.clone()))),
             note: None,
         };
         let available = Posting {
-            account: "allocations:checking:available".into(), // TODO Names
+            account: names.available.as_str().into(),
             expression: None,
             note: None,
         };

@@ -1,4 +1,4 @@
-use std::ops::Mul;
+use std::{ops::Mul, path::PathBuf};
 
 use anyhow::Result;
 use bigdecimal::{BigDecimal, Signed, Zero};
@@ -15,7 +15,8 @@ use crate::{
 };
 
 use self::config::{
-    Configuration, EnvelopeDefinition, IncomeDefinition, RefundDefinition, SpendingDefinition,
+    Configuration, EnvelopeDefinition, IncomeDefinition, Names, RefundDefinition,
+    SpendingDefinition,
 };
 
 mod config;
@@ -35,20 +36,20 @@ impl Spending {
             .has_posting_for("allocations:checking:savings:emergency")
     }
 
-    fn available(&self, total: BigDecimal) -> Transaction {
-        Transactions::new(&self.original)
+    fn available(&self, total: BigDecimal, names: &Names) -> Transaction {
+        Transactions::new(names, &self.original)
             .make_cover_from_available([(self.envelope.clone(), total)].into_iter())
             .unwrap()
     }
 
-    fn emergency(&self, total: BigDecimal) -> Transaction {
-        Transactions::new(&self.original)
+    fn emergency(&self, total: BigDecimal, names: &Names) -> Transaction {
+        Transactions::new(names, &self.original)
             .make_cover_from_emergency([(self.envelope.clone(), total)].into_iter())
             .unwrap()
     }
 
-    fn early(&self, total: BigDecimal) -> Transaction {
-        Transactions::new(&self.original)
+    fn early(&self, total: BigDecimal, names: &Names) -> Transaction {
+        Transactions::new(names, &self.original)
             .make_cover_from_early([(self.envelope.clone(), total)].into_iter())
             .unwrap()
     }
@@ -127,8 +128,8 @@ struct Covered {
     early: Option<Transaction>,
 }
 
-#[derive(Default)]
 struct Available {
+    names: Names,
     available: BigDecimal,
     emergency: BigDecimal,
     early: BigDecimal,
@@ -145,18 +146,27 @@ impl std::fmt::Debug for Available {
 }
 
 impl Available {
+    fn new(names: Names) -> Self {
+        Self {
+            names,
+            available: BigDecimal::default(),
+            emergency: BigDecimal::default(),
+            early: BigDecimal::default(),
+        }
+    }
+
     fn update(&mut self, tx: &Transaction) -> Result<()> {
-        for posting in tx.iter_postings_for("allocations:checking:available") {
+        for posting in tx.iter_postings_for(&self.names.available) {
             self.available += posting.has_value().unwrap();
             assert!(self.available >= BigDecimal::zero());
         }
 
-        for posting in tx.iter_postings_for("allocations:checking:early") {
+        for posting in tx.iter_postings_for(&self.names.early) {
             self.early += posting.has_value().unwrap();
             assert!(self.early >= BigDecimal::zero());
         }
 
-        for posting in tx.iter_postings_for("allocations:checking:savings:emergency") {
+        for posting in tx.iter_postings_for(&self.names.emergency) {
             self.emergency += posting.has_value().unwrap();
             assert!(self.emergency >= BigDecimal::zero());
         }
@@ -175,7 +185,10 @@ impl Available {
                 } else {
                     if self.early.is_positive() {
                         let taking = std::cmp::min(remaining.clone(), self.early.clone());
-                        (Some(spending.early(taking.clone())), remaining - taking)
+                        (
+                            Some(spending.early(taking.clone(), &self.names)),
+                            remaining - taking,
+                        )
                     } else {
                         return None;
                     }
@@ -186,7 +199,10 @@ impl Available {
 
         let (available, remaining) = if remaining.is_positive() && self.available.is_positive() {
             let taking = std::cmp::min(remaining.clone(), self.available.clone());
-            (Some(spending.available(taking.clone())), remaining - taking)
+            (
+                Some(spending.available(taking.clone(), &self.names)),
+                remaining - taking,
+            )
         } else {
             (None, remaining)
         };
@@ -194,7 +210,10 @@ impl Available {
         let (emergency, remaining) =
             if remaining.is_positive() && self.emergency.is_positive() && emergency {
                 let taking = std::cmp::min(remaining.clone(), self.emergency.clone());
-                (Some(spending.emergency(taking.clone())), remaining - taking)
+                (
+                    Some(spending.emergency(taking.clone(), &self.names)),
+                    remaining - taking,
+                )
             } else {
                 (None, remaining)
             };
@@ -211,9 +230,9 @@ impl Available {
     }
 }
 
-#[derive(Default)]
 struct Finances {
     today: Option<NaiveDate>,
+    names: Names,
     matchers: Matchers,
     generated: Vec<Transaction>,
     available: Available,
@@ -222,11 +241,17 @@ struct Finances {
 }
 
 impl Finances {
-    fn new(matchers: Matchers) -> Self {
-        Self {
+    fn new(config: &Configuration) -> Result<Self> {
+        let matchers = Matchers::new(config)?;
+        Ok(Self {
             matchers,
-            ..Default::default()
-        }
+            today: None,
+            names: config.names.clone(),
+            generated: Vec::default(),
+            available: Available::new(config.names.clone()),
+            taxes: Vec::default(),
+            pending: Vec::default(),
+        })
     }
 
     fn handle(&mut self, tx: &Transaction) -> Result<()> {
@@ -291,7 +316,10 @@ impl Finances {
                         .clone()
                         .into_iter()
                         .map(|rule| Matcher {
-                            op: Box::new(ApplyTaxes { rule }),
+                            op: Box::new(ApplyTaxes {
+                                names: self.names.clone(),
+                                rule,
+                            }),
                         })
                         .collect_vec();
                 }
@@ -403,16 +431,19 @@ impl Finances {
 }
 
 #[derive(Debug, Args)]
-pub struct Command {}
+pub struct Command {
+    #[arg(long, value_name = "CONFIG")]
+    config: PathBuf,
+    #[arg(long, value_name = "GENERATED")]
+    generated: PathBuf,
+}
 
-pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> {
-    let configuration = config::Configuration::load("/home/jlewallen/sync/finances/lalloc.json")?;
-
-    let matchers = Matchers::new(&configuration)?;
-
-    let mut finances = Finances::new(matchers);
+pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
+    let configuration = config::Configuration::load(&cmd.config)?;
 
     let sorted = file.iter_transactions_in_order().collect::<Vec<_>>();
+
+    let mut finances = Finances::new(&configuration)?;
 
     for tx in sorted
         .iter()
@@ -427,7 +458,7 @@ pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> 
         .map(|tx| vec![Node::Transaction(tx), Node::EmptyLine])
         .flatten()
         .collect_vec();
-    let mut writer = std::fs::File::create("lalloc.g.ledger.new")?;
+    let mut writer = std::fs::File::create(&cmd.generated)?;
     let printer = Printer::default();
     printer.write_nodes(&mut writer, nodes.iter())?;
 
@@ -454,6 +485,7 @@ impl Operator for Noop {
 
 #[derive(Debug)]
 struct AllocatePaycheck {
+    names: Names,
     income: IncomeDefinition,
 }
 
@@ -468,7 +500,7 @@ impl Operator for AllocatePaycheck {
         let template = pay::PaycheckTemplate::new(&self.income.name(), tx.date);
         let paycheck = template.generate(&tx)?;
         let cycle = self.income.cycle();
-        let transactions = paycheck.transactions(cycle)?;
+        let transactions = paycheck.transactions(cycle, &self.names)?;
 
         info!(
             "{:?} {} {:#?}",
@@ -489,6 +521,7 @@ const TAX_TAG: &str = ":tax:";
 
 #[derive(Debug)]
 struct RefundMoney {
+    names: Names,
     config: RefundDefinition,
 }
 
@@ -508,49 +541,32 @@ impl Operator for RefundMoney {
             Ok(Vec::default())
         } else {
             Ok(vec![Operation::RefundedToAvailable(
-                Transactions::new(tx).make_refund(refunded.into_iter())?,
+                Transactions::new(&self.names, tx).make_refund(refunded.into_iter())?,
             )])
         }
     }
 }
 
-fn get_envelope_source(tx: &Transaction) -> Option<String> {
-    for p in tx.postings.iter() {
-        if p.account.as_str() == "assets:checking" {
-            return Some("assets:checking:reserved".to_owned());
-        }
-        if p.account.as_str().starts_with("liabilities:cards:") {
-            return Some(
-                "allocations:checking:".to_owned() + &p.account.as_str().replace("cards:", ""),
-            );
-        }
-    }
-
-    None
-}
-
 #[derive(Debug)]
 struct FillEnvelopeAndCoverSpending {
+    names: Names,
     config: EnvelopeDefinition,
 }
 
 impl Operator for FillEnvelopeAndCoverSpending {
     fn matches(&self, tx: &Transaction) -> bool {
         tx.has_posting_for_re(&self.config.regex())
+            && !tx.notes.iter().any(|n| n.contains(MANUAL_TAG))
     }
 
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>> {
-        if tx.notes.iter().any(|n| n.contains(MANUAL_TAG)) {
-            return Ok(Vec::default());
-        }
-
         let total: BigDecimal = tx
             .iter_postings_for_re(self.config.regex())
             .flat_map(|p| p.has_value())
             .sum();
 
         let envelope: AccountPath = self.config.name.as_str().into();
-        let envelope_withdrawal = Transactions::new(tx)
+        let envelope_withdrawal = Transactions::new(&self.names, tx)
             .make_envelope_withdrawal(vec![(envelope.clone(), total.clone())].into_iter())?;
 
         if total.is_positive() {
@@ -566,8 +582,8 @@ impl Operator for FillEnvelopeAndCoverSpending {
                 Operation::CoverSpending(spending),
             ])
         } else {
-            let refund =
-                Transactions::new(tx).make_refund(vec![(envelope.clone(), -total)].into_iter())?;
+            let refund = Transactions::new(&self.names, tx)
+                .make_refund(vec![(envelope.clone(), -total)].into_iter())?;
 
             Ok(vec![
                 Operation::EnvelopeWithdrawal(envelope_withdrawal),
@@ -603,15 +619,7 @@ impl Operator for CoverSpending {
             .map(|(a, v)| (a, v.into_iter().map(|(_, v)| v.abs()).sum()))
             .collect_vec();
 
-        debug!("SPENDING {:?} {:?}", covering, tx);
-
         if covering.len() > 0 {
-            if covering.len() != 1 {
-                println!("\n{:#?}\n", covering);
-                println!("\n{:#?}\n", tx);
-                assert!(covering.len() == 1);
-            }
-
             let (envelope, total) = covering.into_iter().next().unwrap();
 
             let spending = Spending {
@@ -638,26 +646,33 @@ impl Operator for CoverSpending {
 
 #[derive(Debug)]
 struct ApplyTaxes {
+    names: Names,
     rule: TaxRule,
 }
 
 impl Operator for ApplyTaxes {
     fn matches(&self, tx: &Transaction) -> bool {
-        self.rule.matches(tx)
+        if self.rule.matches(tx) {
+            if tx.notes.iter().any(|n| n.contains(MANUAL_TAG)) {
+                if !tx.notes.iter().any(|n| n.contains(TAX_TAG)) {
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        } else {
+            false
+        }
     }
 
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>> {
-        if tx.notes.iter().any(|n| n.contains(MANUAL_TAG)) {
-            if !tx.notes.iter().any(|n| n.contains(TAX_TAG)) {
-                return Ok(Vec::default());
-            }
-        }
-
         let taxed = self.rule.amount(tx).unwrap();
 
         let spending = Spending {
             total: taxed,
-            envelope: "allocations:checking:savings:taxes".into(),
+            envelope: self.names.taxes.as_str().into(),
             original: tx.clone(),
             scheduled: None,
         };
@@ -693,10 +708,16 @@ impl Matchers {
             .clone()
             .into_iter()
             .map(|income| Matcher {
-                op: Box::new(AllocatePaycheck { income }),
+                op: Box::new(AllocatePaycheck {
+                    names: config.names.clone(),
+                    income,
+                }),
             })
             .chain(config.refund.clone().into_iter().map(|refund| Matcher {
-                op: Box::new(RefundMoney { config: refund }),
+                op: Box::new(RefundMoney {
+                    names: config.names.clone(),
+                    config: refund,
+                }),
             }))
             .chain(config.spending.clone().into_iter().map(|spending| Matcher {
                 op: Box::new(CoverSpending {
@@ -711,7 +732,10 @@ impl Matchers {
                     .into_iter()
                     .filter(|envelope| envelope.enabled)
                     .map(|envelope| Matcher {
-                        op: Box::new(FillEnvelopeAndCoverSpending { config: envelope }),
+                        op: Box::new(FillEnvelopeAndCoverSpending {
+                            names: config.names.clone(),
+                            config: envelope,
+                        }),
                     }),
             )
             .collect::<Vec<_>>();
@@ -721,159 +745,92 @@ impl Matchers {
 }
 
 struct Transactions<'t> {
+    names: &'t Names,
     tx: &'t Transaction,
 }
 
 impl<'t> Transactions<'t> {
-    fn new(tx: &'t Transaction) -> Self {
-        Self { tx }
+    fn new(names: &'t Names, tx: &'t Transaction) -> Self {
+        Self { names, tx }
+    }
+
+    fn make(
+        &self,
+        description: &str,
+        balanced_by: impl Into<AccountPath>,
+        postings: impl Iterator<Item = (AccountPath, BigDecimal)>,
+    ) -> Result<Transaction> {
+        Ok(Transaction {
+            date: self.tx.date,
+            payee: format!("{} `{}`", description, self.tx.payee),
+            cleared: true,
+            notes: Vec::default(),
+            postings: postings
+                .into_iter()
+                .map(|(account, value)| Posting {
+                    account,
+                    expression: Some(Expression::Literal(Numeric::Decimal(value))),
+                    note: None,
+                })
+                .chain(std::iter::once(Posting {
+                    account: balanced_by.into(),
+                    expression: None,
+                    note: None,
+                }))
+                .collect_vec(),
+            mid: None,
+            order: None,
+            origin: Some(Origin::Generated),
+        }
+        .into_balanced()?)
     }
 
     fn make_refund(
         &self,
         refunded: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
-        Ok(Transaction {
-            date: self.tx.date,
-            payee: format!("refund `{}`", self.tx.payee),
-            cleared: true,
-            notes: Vec::default(),
-            postings: refunded
-                .into_iter()
-                .map(|(account, value)| Posting {
-                    account,
-                    expression: Some(Expression::Literal(Numeric::Decimal(-value))),
-                    note: None,
-                })
-                .chain(std::iter::once(Posting {
-                    account: "allocations:checking:available".into(), // TODO Names
-                    expression: None,
-                    note: None,
-                }))
-                .collect_vec(),
-            mid: None,
-            order: None,
-            origin: Some(Origin::Generated),
-        }
-        .into_balanced()?)
+        self.make(
+            "refund",
+            self.names.available.as_str(),
+            refunded.into_iter().map(|(a, v)| (a, -v)),
+        )
     }
 
     fn make_envelope_withdrawal(
         &self,
         reserving: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
-        let source = get_envelope_source(self.tx).ok_or(Error::NoEnvelopeSource)?;
+        let source = self
+            .names
+            .get_envelope_source(self.tx)
+            .ok_or(Error::NoEnvelopeSource)?;
 
-        Ok(Transaction {
-            date: self.tx.date,
-            payee: format!("from envelope `{}`", self.tx.payee),
-            cleared: true,
-            notes: Vec::default(),
-            postings: reserving
-                .into_iter()
-                .map(|(account, value)| Posting {
-                    account,
-                    expression: Some(Expression::Literal(Numeric::Decimal(-value))),
-                    note: None,
-                })
-                .chain(std::iter::once(Posting {
-                    account: source.as_str().into(),
-                    expression: None,
-                    note: None,
-                }))
-                .collect_vec(),
-            mid: None,
-            order: None,
-            origin: Some(Origin::Generated),
-        }
-        .into_balanced()?)
+        self.make(
+            "from envelope",
+            source.as_str(),
+            reserving.into_iter().map(|(a, v)| (a, -v)),
+        )
     }
 
     fn make_cover_from_available(
         &self,
         spending: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
-        Ok(Transaction {
-            date: self.tx.date,
-            payee: format!("cover `{}`", self.tx.payee),
-            cleared: true,
-            notes: Vec::default(),
-            postings: spending
-                .into_iter()
-                .map(|(account, value)| Posting {
-                    account,
-                    expression: Some(Expression::Literal(Numeric::Decimal(value))),
-                    note: None,
-                })
-                .chain(std::iter::once(Posting {
-                    account: "allocations:checking:available".into(), // TODO Names
-                    expression: None,
-                    note: None,
-                }))
-                .collect_vec(),
-            mid: None,
-            order: None,
-            origin: Some(Origin::Generated),
-        }
-        .into_balanced()?)
+        self.make("cover", self.names.available.as_str(), spending)
     }
 
     fn make_cover_from_emergency(
         &self,
         spending: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
-        Ok(Transaction {
-            date: self.tx.date,
-            payee: format!("emergency `{}`", self.tx.payee),
-            cleared: true,
-            notes: Vec::default(),
-            postings: spending
-                .into_iter()
-                .map(|(account, value)| Posting {
-                    account,
-                    expression: Some(Expression::Literal(Numeric::Decimal(value))),
-                    note: None,
-                })
-                .chain(std::iter::once(Posting {
-                    account: "allocations:checking:savings:emergency".into(),
-                    expression: None,
-                    note: None,
-                }))
-                .collect_vec(),
-            mid: None,
-            order: None,
-            origin: Some(Origin::Generated),
-        }
-        .into_balanced()?)
+        self.make("emergency", self.names.emergency.as_str(), spending)
     }
 
     fn make_cover_from_early(
         &self,
         spending: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
-        Ok(Transaction {
-            date: self.tx.date,
-            payee: format!("early `{}`", self.tx.payee),
-            cleared: true,
-            notes: Vec::default(),
-            postings: spending
-                .into_iter()
-                .map(|(account, value)| Posting {
-                    account,
-                    expression: Some(Expression::Literal(Numeric::Decimal(value))),
-                    note: None,
-                })
-                .chain(std::iter::once(Posting {
-                    account: "allocations:checking:early".into(),
-                    expression: None,
-                    note: None,
-                }))
-                .collect_vec(),
-            mid: None,
-            order: None,
-            origin: Some(Origin::Generated),
-        }
-        .into_balanced()?)
+        self.make("early", self.names.early.as_str(), spending)
     }
 }
 

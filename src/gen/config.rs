@@ -1,7 +1,9 @@
 use anyhow::Result;
 use regex::Regex;
 use serde::Deserialize;
-use std::fs::File;
+use std::{fs::File, path::Path};
+
+use crate::model::Transaction;
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -16,25 +18,41 @@ pub struct Configuration {
 }
 
 impl Configuration {
-    pub fn load(path: &str) -> Result<Configuration> {
+    pub fn load(path: &Path) -> Result<Configuration> {
         let file = File::open(path)?;
         Ok(serde_json::from_reader(file)?)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
 pub struct Names {
-    available: String,
-    refunded: String,
-    emergency: String,
-    taxes: String,
-    reserved: String,
-    early: String,
+    pub available: String,
+    pub refunded: String,
+    pub emergency: String,
+    pub taxes: String,
+    pub reserved: String,
+    pub early: String,
+}
+
+impl Names {
+    pub fn get_envelope_source(&self, tx: &Transaction) -> Option<String> {
+        for p in tx.postings.iter() {
+            if p.account.as_str() == "assets:checking" {
+                return Some("assets:checking:reserved".to_owned());
+            }
+            if p.account.as_str().starts_with("liabilities:cards:") {
+                return Some(
+                    "allocations:checking:".to_owned() + &p.account.as_str().replace("cards:", ""),
+                );
+            }
+        }
+
+        None
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 pub struct IncomeDefinition {
     #[serde(with = "serde_regex")]
     path: regex::Regex,
@@ -42,16 +60,16 @@ pub struct IncomeDefinition {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 struct IncomeHandler {
     income: InnerIncome,
+    #[allow(dead_code)]
     path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 struct InnerIncome {
     name: String,
+    #[allow(dead_code)]
     epoch: f32,
     factor: String,
 }
@@ -75,16 +93,15 @@ impl IncomeDefinition {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 pub struct OverdraftDefinition {
-    pub path: String,
+    #[allow(dead_code)]
+    path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 pub struct SpendingDefinition {
     #[serde(with = "serde_regex")]
-    pub path: regex::Regex,
+    path: regex::Regex,
 }
 
 impl SpendingDefinition {
@@ -94,17 +111,16 @@ impl SpendingDefinition {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 pub struct EmergencyDefinition {
+    #[allow(dead_code)]
     #[serde(with = "serde_regex")]
-    pub path: regex::Regex,
+    path: regex::Regex,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 pub struct RefundDefinition {
     #[serde(with = "serde_regex")]
-    pub path: regex::Regex,
+    path: regex::Regex,
 }
 
 impl RefundDefinition {
@@ -114,11 +130,10 @@ impl RefundDefinition {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 pub struct EnvelopeDefinition {
-    pub name: String,
     #[serde(with = "serde_regex")]
-    pub expense: regex::Regex,
+    expense: regex::Regex,
+    pub name: String,
     pub enabled: bool,
 }
 
