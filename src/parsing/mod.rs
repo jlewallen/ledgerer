@@ -112,6 +112,7 @@ fn parse_transaction(i: &str) -> IResult<&str, Node> {
                 postings,
                 origin: Some(Origin::File),
                 mid: None,
+                order: None,
             })
         },
     )(i)

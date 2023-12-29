@@ -30,6 +30,16 @@ pub fn optional_naive_to_pacific(v: &Option<String>) -> Result<Option<DateTime<U
         })
 }
 
+impl Default for Printer {
+    fn default() -> Self {
+        Self {
+            recursive: Default::default(),
+            after: Default::default(),
+            before: Default::default(),
+        }
+    }
+}
+
 impl Printer {
     pub fn from(cmd: &Command) -> Result<Self> {
         let after = optional_naive_to_pacific(&cmd.after)?;
@@ -127,7 +137,7 @@ impl Printer {
         }
     }
 
-    fn write_nodes<'a>(
+    pub fn write_nodes<'a>(
         &self,
         w: &mut impl Write,
         iter: impl Iterator<Item = &'a Node>,
