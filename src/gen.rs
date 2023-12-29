@@ -30,6 +30,11 @@ struct Spending {
 }
 
 impl Spending {
+    fn affects_emergency(&self) -> bool {
+        self.original
+            .has_posting_for("allocations:checking:savings:emergency")
+    }
+
     fn available(&self, total: BigDecimal) -> Transaction {
         Transactions::new(&self.original)
             .make_cover_from_available([(self.envelope.clone(), total)].into_iter())
@@ -122,11 +127,21 @@ struct Covered {
     early: Option<Transaction>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Available {
     available: BigDecimal,
     emergency: BigDecimal,
     early: BigDecimal,
+}
+
+impl std::fmt::Debug for Available {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Avail={} Emerg={} Early={}",
+            &self.available, &self.emergency, &self.early
+        )
+    }
 }
 
 impl Available {
@@ -149,7 +164,8 @@ impl Available {
         Ok(())
     }
 
-    fn cover(&self, spending: &Spending, emergency: bool, today: &NaiveDate) -> Option<Covered> {
+    fn cover(&self, spending: &Spending, today: &NaiveDate) -> Option<Covered> {
+        let emergency = !spending.affects_emergency();
         let remaining = spending.total.clone();
 
         let (early, remaining) = match spending.scheduled.as_ref() {
@@ -246,15 +262,15 @@ impl Finances {
             Operation::EnvelopeWithdrawal(_) => true,
             Operation::CoverSpending(spending) => self
                 .available
-                .cover(spending, true, self.today.as_ref().unwrap())
+                .cover(spending, self.today.as_ref().unwrap())
                 .is_some(),
             Operation::CoverEmergency(spending) => self
                 .available
-                .cover(spending, false, self.today.as_ref().unwrap())
+                .cover(spending, self.today.as_ref().unwrap())
                 .is_some(),
             Operation::Scheduled(spending) => self
                 .available
-                .cover(spending, false, self.today.as_ref().unwrap())
+                .cover(spending, self.today.as_ref().unwrap())
                 .is_some(),
         }
     }
@@ -307,12 +323,12 @@ impl Finances {
             Operation::CoverSpending(spending) | Operation::Scheduled(spending) => {
                 let covered = self
                     .available
-                    .cover(&spending, true, self.today.as_ref().unwrap());
+                    .cover(&spending, self.today.as_ref().unwrap());
 
                 if let Some(covered) = covered {
                     if let Some(tx) = covered.early {
                         debug!(
-                            "cover spending (early) {:?} ({:?})",
+                            "cover spending (early) {} ({:?})",
                             spending.total, self.available
                         );
 
@@ -322,7 +338,7 @@ impl Finances {
 
                     if let Some(tx) = covered.available {
                         debug!(
-                            "cover spending (available) {:?} ({:?})",
+                            "cover spending (available) {} ({:?})",
                             spending.total, self.available
                         );
 
@@ -332,7 +348,7 @@ impl Finances {
 
                     if let Some(tx) = covered.emergency {
                         debug!(
-                            "cover spending (emergency) {:?} ({:?})",
+                            "cover spending (emergency) {} ({:?})",
                             spending.total, self.available
                         );
 
@@ -366,7 +382,7 @@ impl Finances {
             Operation::CoverEmergency(spending) => {
                 let covered = self
                     .available
-                    .cover(&spending, false, self.today.as_ref().unwrap());
+                    .cover(&spending, self.today.as_ref().unwrap());
 
                 if let Some(covered) = covered {
                     if let Some(tx) = covered.available {
@@ -536,11 +552,6 @@ impl Operator for FillEnvelopeAndCoverSpending {
         let envelope: AccountPath = self.config.name.as_str().into();
         let envelope_withdrawal = Transactions::new(tx)
             .make_envelope_withdrawal(vec![(envelope.clone(), total.clone())].into_iter())?;
-
-        info!(
-            "envelope {:?} {:?} {:?} {:?} {:?}",
-            tx.date, tx.payee, tx.notes, total, envelope_withdrawal
-        );
 
         if total.is_positive() {
             let spending = Spending {
