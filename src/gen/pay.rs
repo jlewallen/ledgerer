@@ -128,7 +128,7 @@ impl AllocatedPay {
         available: Posting,
     ) -> Result<Vec<Transaction>> {
         Ok(vec![Transaction {
-            date: self.date.clone(),
+            date: self.date,
             payee: "income allocation".to_owned(),
             cleared: true,
             mid: None,
@@ -267,8 +267,8 @@ impl PaycheckTemplate {
         tera.register_function("monthly", {
             let paycheck = self.paycheck.clone();
             move |args: &HashMap<String, Value>| -> tera::Result<Value> {
-                let account = Self::get_account(args).ok_or_else(|| Error::Arguments())?;
-                let value = Self::get_decimal(args, "value").ok_or_else(|| Error::Arguments())?;
+                let account = Self::get_account(args).ok_or_else(Error::Arguments)?;
+                let value = Self::get_decimal(args, "value").ok_or_else(Error::Arguments)?;
                 let note = Self::get_note(args);
                 let mut paycheck = paycheck.lock().unwrap();
                 paycheck.as_mut().unwrap().monthly(account, value, note);
@@ -279,8 +279,8 @@ impl PaycheckTemplate {
         tera.register_function("yearly", {
             let paycheck = self.paycheck.clone();
             move |args: &HashMap<String, Value>| -> tera::Result<Value> {
-                let account = Self::get_account(args).ok_or_else(|| Error::Arguments())?;
-                let value = Self::get_decimal(args, "value").ok_or_else(|| Error::Arguments())?;
+                let account = Self::get_account(args).ok_or_else(Error::Arguments)?;
+                let value = Self::get_decimal(args, "value").ok_or_else(Error::Arguments)?;
                 let note = Self::get_note(args);
                 let mut paycheck = paycheck.lock().unwrap();
                 paycheck.as_mut().unwrap().yearly(account, value, note);
@@ -291,8 +291,8 @@ impl PaycheckTemplate {
         tera.register_function("tax", {
             let paycheck = self.paycheck.clone();
             move |args: &HashMap<String, Value>| -> tera::Result<Value> {
-                let account = Self::get_account(args).ok_or_else(|| Error::Arguments())?;
-                let rate = Self::get_decimal(args, "rate").ok_or_else(|| Error::Arguments())?;
+                let account = Self::get_account(args).ok_or_else(Error::Arguments)?;
+                let rate = Self::get_decimal(args, "rate").ok_or_else(Error::Arguments)?;
                 let mut paycheck = paycheck.lock().unwrap();
                 paycheck.as_mut().unwrap().tax(rate, account.to_string())?;
                 Ok(Value::Null)
@@ -316,11 +316,11 @@ impl PaycheckTemplate {
     }
 
     fn get_account(args: &HashMap<String, Value>) -> Option<&str> {
-        args.get("account").map(|v| v.as_str()).flatten()
+        args.get("account").and_then(|v| v.as_str())
     }
 
     fn get_note(args: &HashMap<String, Value>) -> Option<&str> {
-        args.get("note").map(|v| v.as_str()).flatten()
+        args.get("note").and_then(|v| v.as_str())
     }
 
     fn get_decimal(args: &HashMap<String, Value>, key: &str) -> Option<BigDecimal> {

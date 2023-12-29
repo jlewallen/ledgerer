@@ -176,7 +176,7 @@ impl std::fmt::Display for Expression {
                     quantity.to_text_format(""),
                     symbol,
                     price.to_text_format("$"),
-                    date.format("%Y/%m/%d").to_string()
+                    date.format("%Y/%m/%d")
                 )),
                 CommodityExpression {
                     quantity: _,

@@ -15,6 +15,7 @@ pub struct Command {
     pub before: Option<String>,
 }
 
+#[derive(Default)]
 pub struct Printer {
     pub recursive: bool,
     pub after: Option<DateTime<Utc>>,
@@ -30,15 +31,7 @@ pub fn optional_naive_to_pacific(v: &Option<String>) -> Result<Option<DateTime<U
         })
 }
 
-impl Default for Printer {
-    fn default() -> Self {
-        Self {
-            recursive: Default::default(),
-            after: Default::default(),
-            before: Default::default(),
-        }
-    }
-}
+
 
 impl Printer {
     pub fn from(cmd: &Command) -> Result<Self> {

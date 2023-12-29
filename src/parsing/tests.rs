@@ -588,7 +588,7 @@ fn test_parse_transaction_with_note() -> Result<()> {
             mid: None,
             order: None,
             origin: Some(Origin::File),
-            notes: Vec::default(),
+            notes: vec!["hello-world".to_owned()],
             refs: Vec::default(),
             postings: vec![
                 Posting {

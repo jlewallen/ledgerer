@@ -182,16 +182,14 @@ impl Available {
             Some(date) => {
                 if today >= date {
                     (None, remaining)
+                } else if self.early.is_positive() {
+                    let taking = std::cmp::min(remaining.clone(), self.early.clone());
+                    (
+                        Some(spending.early(taking.clone(), &self.names)),
+                        remaining - taking,
+                    )
                 } else {
-                    if self.early.is_positive() {
-                        let taking = std::cmp::min(remaining.clone(), self.early.clone());
-                        (
-                            Some(spending.early(taking.clone(), &self.names)),
-                            remaining - taking,
-                        )
-                    } else {
-                        return None;
-                    }
+                    return None;
                 }
             }
             None => (None, remaining),
@@ -449,8 +447,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let nodes = finances
         .generated
         .into_iter()
-        .map(|tx| vec![Node::Transaction(tx), Node::EmptyLine])
-        .flatten()
+        .flat_map(|tx| vec![Node::Transaction(tx), Node::EmptyLine])
         .collect_vec();
     let mut writer = std::fs::File::create(&cmd.generated)?;
     let printer = Printer::default();
@@ -485,14 +482,14 @@ struct AllocatePaycheck {
 
 impl Operator for AllocatePaycheck {
     fn matches(&self, tx: &Transaction) -> bool {
-        tx.has_posting_for_re(&self.income.regex())
+        tx.has_posting_for_re(self.income.regex())
     }
 
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>> {
         debug!("{:?} {}", tx.date, tx.payee);
 
-        let template = pay::PaycheckTemplate::new(&self.income.name(), tx.date);
-        let paycheck = template.generate(&tx)?;
+        let template = pay::PaycheckTemplate::new(self.income.name(), tx.date);
+        let paycheck = template.generate(tx)?;
         let cycle = self.income.cycle();
         let transactions = paycheck.transactions(cycle, &self.names)?;
 
@@ -521,13 +518,13 @@ struct RefundMoney {
 
 impl Operator for RefundMoney {
     fn matches(&self, tx: &Transaction) -> bool {
-        tx.has_posting_for_re(&self.config.regex())
+        tx.has_posting_for_re(self.config.regex())
     }
 
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>> {
         // We only apply to money being deposited into the configured accounts.
         let refunded = tx
-            .iter_postings_for_re(&self.config.regex())
+            .iter_postings_for_re(self.config.regex())
             .flat_map(|p| p.only_positive().map(|value| (p.account.clone(), value)))
             .collect_vec();
 
@@ -549,7 +546,7 @@ struct FillEnvelopeAndCoverSpending {
 
 impl Operator for FillEnvelopeAndCoverSpending {
     fn matches(&self, tx: &Transaction) -> bool {
-        tx.has_posting_for_re(&self.config.regex())
+        tx.has_posting_for_re(self.config.regex())
             && !tx.notes.iter().any(|n| n.contains(MANUAL_TAG))
     }
 
@@ -595,7 +592,7 @@ struct CoverSpending {
 
 impl Operator for CoverSpending {
     fn matches(&self, tx: &Transaction) -> bool {
-        tx.has_posting_for_re(&self.config.regex())
+        tx.has_posting_for_re(self.config.regex())
     }
 
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>> {
@@ -613,7 +610,7 @@ impl Operator for CoverSpending {
             .map(|(a, v)| (a, v.into_iter().map(|(_, v)| v.abs()).sum()))
             .collect_vec();
 
-        if covering.len() > 0 {
+        if !covering.is_empty() {
             let (envelope, total) = covering.into_iter().next().unwrap();
 
             let spending = Spending {
@@ -627,7 +624,7 @@ impl Operator for CoverSpending {
                 Ok(spending
                     .scheduled(maximum.into())
                     .into_iter()
-                    .map(|scheduled| Operation::Scheduled(scheduled))
+                    .map(Operation::Scheduled)
                     .collect_vec())
             } else {
                 Ok(vec![Operation::CoverSpending(spending)])
@@ -648,11 +645,7 @@ impl Operator for ApplyTaxes {
     fn matches(&self, tx: &Transaction) -> bool {
         if self.rule.matches(tx) {
             if tx.notes.iter().any(|n| n.contains(MANUAL_TAG)) {
-                if !tx.notes.iter().any(|n| n.contains(TAX_TAG)) {
-                    false
-                } else {
-                    true
-                }
+                tx.notes.iter().any(|n| n.contains(TAX_TAG))
             } else {
                 true
             }
@@ -754,7 +747,7 @@ impl<'t> Transactions<'t> {
         balanced_by: impl Into<AccountPath>,
         postings: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
-        Ok(Transaction {
+        Transaction {
             date: self.tx.date,
             payee: match self.tx.mid.as_ref() {
                 Some(mid) => format!("{} `{}` #{}#", description, self.tx.payee, mid),
@@ -780,7 +773,7 @@ impl<'t> Transactions<'t> {
             origin: Some(Origin::Generated),
             refs: Vec::default(),
         }
-        .into_balanced()?)
+        .into_balanced()
     }
 
     fn make_refund(
