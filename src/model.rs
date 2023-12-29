@@ -246,6 +246,16 @@ impl Transaction {
         }
     }
 
+    pub fn specific_order(&self) -> Option<usize> {
+        self.notes
+            .iter()
+            .flat_map(|n| match n.split_once(":order:") {
+                Some((_, order)) => order.parse().ok(),
+                None => None,
+            })
+            .next()
+    }
+
     pub fn has_posting_for(&self, name: &str) -> bool {
         self.postings.iter().any(|p| p.account.as_str() == name)
     }
@@ -648,7 +658,7 @@ impl LedgerFile {
 
     pub fn iter_transactions_in_order(&self) -> impl Iterator<Item = &Transaction> {
         let mut txs: Vec<&Transaction> = self.iter_transactions().collect();
-        txs.sort_unstable_by_key(|i| (i.date, i.order, &i.payee));
+        txs.sort_unstable_by_key(|i| (i.date, i.order, i.specific_order(), &i.payee));
         txs.into_iter()
     }
 

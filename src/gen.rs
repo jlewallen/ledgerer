@@ -447,7 +447,11 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let nodes = finances
         .generated
         .into_iter()
-        .flat_map(|tx| vec![Node::Transaction(tx), Node::EmptyLine])
+        .enumerate()
+        .flat_map(|(i, mut tx)| {
+            tx.notes.push(format!(":order:{}", i));
+            vec![Node::Transaction(tx), Node::EmptyLine]
+        })
         .collect_vec();
     let mut writer = std::fs::File::create(&cmd.generated)?;
     let printer = Printer::default();
