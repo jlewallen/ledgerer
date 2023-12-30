@@ -121,11 +121,48 @@ enum Operation {
     Scheduled(Spending),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Covered {
     available: Option<Transaction>,
     emergency: Option<Transaction>,
     early: Option<Transaction>,
+}
+
+impl Covered {
+    fn transactions(&self) -> impl Iterator<Item = &Transaction> {
+        vec![
+            self.early.as_ref(),
+            self.available.as_ref(),
+            self.emergency.as_ref(),
+        ]
+        .into_iter()
+        .flat_map(|e| e)
+    }
+
+    fn to_corrective_operations(self) -> impl Iterator<Item = Operation> {
+        if let Some(tx) = self.emergency {
+            let covering = tx
+                .postings
+                .iter()
+                .flat_map(|p| p.only_negative().map(|v| (p.account.clone(), -v)))
+                .collect_vec();
+
+            assert!(covering.len() == 1);
+
+            let (envelope, total) = covering.into_iter().next().unwrap();
+
+            let spending = Spending {
+                total,
+                envelope,
+                original: tx,
+                scheduled: None,
+            };
+
+            vec![Operation::CoverEmergency(spending)].into_iter()
+        } else {
+            Vec::default().into_iter()
+        }
+    }
 }
 
 struct Available {
@@ -299,7 +336,7 @@ impl Finances {
 
         match op {
             Operation::AllocatePaycheck(tx, taxes) => {
-                self.available.update(&tx)?; // Enforce only incrementing available?
+                self.available.update(&tx)?;
                 self.generated.push(tx);
 
                 if let Some(taxes) = taxes.as_ref() {
@@ -332,88 +369,25 @@ impl Finances {
 
                 self.pending = unprocessed;
             }
-            Operation::RefundedToAvailable(tx) => {
-                self.available.update(&tx)?; // Enforce only incrementing available?
+            Operation::RefundedToAvailable(tx) | Operation::EnvelopeWithdrawal(tx) => {
+                self.available.update(&tx)?;
                 self.generated.push(tx);
             }
-            Operation::EnvelopeWithdrawal(tx) => {
-                self.available.update(&tx)?; // Enforce only incrementing available?
-                self.generated.push(tx);
-            }
-            Operation::CoverSpending(spending) | Operation::Scheduled(spending) => {
+            Operation::CoverSpending(spending)
+            | Operation::Scheduled(spending)
+            | Operation::CoverEmergency(spending) => {
                 let covered = self
                     .available
                     .cover(&spending, self.today.as_ref().unwrap());
 
                 if let Some(covered) = covered {
-                    if let Some(tx) = covered.early {
-                        debug!(
-                            "cover spending (early) {} ({:?})",
-                            spending.total, self.available
-                        );
-
-                        self.available.update(&tx)?;
-                        self.generated.push(tx);
-                    }
-
-                    if let Some(tx) = covered.available {
-                        debug!(
-                            "cover spending (available) {} ({:?})",
-                            spending.total, self.available
-                        );
-
-                        self.available.update(&tx)?;
-                        self.generated.push(tx);
-                    }
-
-                    if let Some(tx) = covered.emergency {
-                        debug!(
-                            "cover spending (emergency) {} ({:?})",
-                            spending.total, self.available
-                        );
-
-                        self.available.update(&tx)?;
+                    for tx in covered.transactions() {
+                        self.available.update(tx)?;
                         self.generated.push(tx.clone());
-
-                        let covering = tx
-                            .postings
-                            .iter()
-                            .filter(|p| {
-                                p.account.as_str() == "allocations:checking:savings:emergency"
-                            })
-                            .map(|p| (p.account.clone(), p.has_value().unwrap().abs()))
-                            .collect_vec();
-
-                        assert!(covering.len() == 1);
-
-                        let (envelope, total) = covering.into_iter().next().unwrap();
-
-                        let spending = Spending {
-                            total,
-                            envelope,
-                            original: tx,
-                            scheduled: None,
-                        };
-
-                        self.pending.push(Operation::CoverEmergency(spending))
                     }
-                }
-            }
-            Operation::CoverEmergency(spending) => {
-                let covered = self
-                    .available
-                    .cover(&spending, self.today.as_ref().unwrap());
 
-                if let Some(covered) = covered {
-                    if let Some(tx) = covered.available {
-                        debug!(
-                            "cover emergency {:?} ({:?})",
-                            spending.total, self.available
-                        );
-
-                        self.available.update(&tx)?;
-                        self.generated.push(tx);
-                    }
+                    let ops = covered.clone().to_corrective_operations();
+                    self.pending.extend(ops);
                 }
             }
         }
