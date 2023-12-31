@@ -36,9 +36,9 @@ impl Format {
             _ => 160,
         };
 
-        assert!(maximum_width >= 40);
+        assert!(maximum_width >= 60);
 
-        let value_width = 10;
+        let value_width = 60;
         let cumulative_width = if cmd.cumulative { value_width } else { 0 };
         let after_values = maximum_width - value_width - cumulative_width - fixed_spaces;
         let name_width = after_values / 2;

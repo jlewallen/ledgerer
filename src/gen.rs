@@ -1,7 +1,7 @@
-use std::{ops::Mul, path::PathBuf};
+use std::{cell::RefCell, ops::Mul, path::PathBuf, rc::Rc};
 
 use anyhow::Result;
-use bigdecimal::{BigDecimal, Signed, Zero};
+use bigdecimal::{BigDecimal, Signed, ToPrimitive, Zero};
 use chrono::{Months, NaiveDate};
 use clap::Args;
 use itertools::Itertools;
@@ -54,27 +54,32 @@ impl Spending {
             .unwrap()
     }
 
-    fn scheduled(self, maximum: BigDecimal) -> Vec<Spending> {
-        let mut scheduled = Vec::default();
-        let mut remaining = self.total;
-        let mut date = self.original.date;
-
-        // This is hideous.
-        while remaining > BigDecimal::zero() {
-            let taking = std::cmp::min(remaining.clone(), maximum.clone());
-
-            scheduled.push(Spending {
-                total: taking.clone(),
+    fn scheduled(self, maximum: Option<BigDecimal>) -> Vec<Spending> {
+        Self::get_payment_amounts(self.total.clone(), maximum)
+            .into_iter()
+            .enumerate()
+            .map(|(i, payment)| Spending {
+                total: payment,
                 envelope: self.envelope.clone(),
                 original: self.original.clone(),
-                scheduled: Some(date),
-            });
+                scheduled: self.original.date.checked_add_months(Months::new(i as u32)),
+            })
+            .collect_vec()
+    }
 
-            remaining -= taking;
-            date = date.checked_add_months(Months::new(1)).unwrap();
+    fn get_payment_amounts(total: BigDecimal, maximum: Option<BigDecimal>) -> Vec<BigDecimal> {
+        match maximum {
+            Some(maximum) => {
+                let full_payments = (&total / &maximum).to_usize().unwrap();
+                let last = total % maximum.clone();
+                (0..full_payments)
+                    .into_iter()
+                    .map(|_| maximum.clone())
+                    .chain(std::iter::once(last))
+                    .collect_vec()
+            }
+            None => vec![total],
         }
-
-        scheduled
     }
 }
 
@@ -118,7 +123,6 @@ enum Operation {
     EnvelopeWithdrawal(Transaction),
     CoverSpending(Spending),
     CoverEmergency(Spending),
-    Scheduled(Spending),
 }
 
 #[derive(Debug, Clone)]
@@ -192,23 +196,30 @@ impl Available {
         }
     }
 
-    fn update(&mut self, tx: &Transaction) -> Result<()> {
-        for posting in tx.iter_postings_for(&self.names.available) {
-            self.available += posting.has_value().unwrap();
-            assert!(self.available >= BigDecimal::zero());
+    fn update(&mut self, tx: &Transaction) {
+        for value in tx
+            .iter_postings_for(&self.names.available)
+            .filter_map(|p| p.has_value())
+        {
+            self.available += value;
+            assert!(self.available >= BigDecimal::zero(), "{:?}", tx);
         }
 
-        for posting in tx.iter_postings_for(&self.names.early) {
-            self.early += posting.has_value().unwrap();
-            assert!(self.early >= BigDecimal::zero());
+        for value in tx
+            .iter_postings_for(&self.names.early)
+            .filter_map(|p| p.has_value())
+        {
+            self.early += value;
+            assert!(self.early >= BigDecimal::zero(), "{:?}", tx);
         }
 
-        for posting in tx.iter_postings_for(&self.names.emergency) {
-            self.emergency += posting.has_value().unwrap();
-            assert!(self.emergency >= BigDecimal::zero());
+        for value in tx
+            .iter_postings_for(&self.names.emergency)
+            .filter_map(|p| p.has_value())
+        {
+            self.emergency += value;
+            assert!(self.emergency >= BigDecimal::zero(), "{:?}", tx);
         }
-
-        Ok(())
     }
 
     fn cover(&self, spending: &Spending, today: &NaiveDate) -> Option<Covered> {
@@ -265,25 +276,65 @@ impl Available {
     }
 }
 
+#[derive(Clone)]
+struct SharedAvailable {
+    available: Rc<RefCell<Available>>,
+}
+
+impl SharedAvailable {
+    fn update(&self, tx: &Transaction) {
+        let mut available = self.available.borrow_mut();
+        available.update(&tx);
+    }
+
+    fn cover(&self, spending: &Spending, today: &NaiveDate) -> Option<Covered> {
+        let available = self.available.borrow_mut();
+        available.cover(spending, today)
+    }
+}
+
+struct Generated {
+    available: SharedAvailable,
+    transactions: Vec<Transaction>,
+}
+
+impl Generated {
+    fn push(&mut self, tx: Transaction) {
+        self.available.update(&tx);
+        self.transactions.push(tx);
+    }
+
+    fn into_iter(self) -> impl Iterator<Item = Transaction> {
+        self.transactions.into_iter()
+    }
+}
+
 struct Finances {
     today: Option<NaiveDate>,
     names: Names,
     matchers: Matchers,
-    generated: Vec<Transaction>,
-    available: Available,
+    generated: Generated,
+    available: SharedAvailable,
     taxes: Vec<Matcher>,
     pending: Vec<Operation>,
 }
 
 impl Finances {
     fn new(config: &Configuration) -> Result<Self> {
-        let matchers = Matchers::new(config)?;
+        let available = SharedAvailable {
+            available: Rc::new(RefCell::new(Available::new(config.names.clone()))),
+        };
+        let generated = Generated {
+            available: available.clone(),
+            transactions: Vec::default(),
+        };
+
         Ok(Self {
-            matchers,
             today: None,
             names: config.names.clone(),
-            generated: Vec::default(),
-            available: Available::new(config.names.clone()),
+            matchers: Matchers::new(config)?,
+            generated,
+            available,
             taxes: Vec::default(),
             pending: Vec::default(),
         })
@@ -301,6 +352,7 @@ impl Finances {
             .flatten();
 
         self.today = Some(tx.date);
+        self.available.update(tx);
 
         for op in ops {
             if self.can_apply(&op) {
@@ -310,8 +362,6 @@ impl Finances {
             }
         }
 
-        self.available.update(tx)?;
-
         Ok(())
     }
 
@@ -320,9 +370,7 @@ impl Finances {
             Operation::AllocatePaycheck(_, _) => true,
             Operation::RefundedToAvailable(_) => true,
             Operation::EnvelopeWithdrawal(_) => true,
-            Operation::CoverSpending(spending)
-            | Operation::CoverEmergency(spending)
-            | Operation::Scheduled(spending) => self
+            Operation::CoverSpending(spending) | Operation::CoverEmergency(spending) => self
                 .available
                 .cover(spending, self.today.as_ref().unwrap())
                 .is_some(),
@@ -336,7 +384,6 @@ impl Finances {
 
         match op {
             Operation::AllocatePaycheck(tx, taxes) => {
-                self.available.update(&tx)?;
                 self.generated.push(tx);
 
                 if let Some(taxes) = taxes.as_ref() {
@@ -369,26 +416,21 @@ impl Finances {
 
                 self.pending = unprocessed;
             }
-            Operation::RefundedToAvailable(tx) | Operation::EnvelopeWithdrawal(tx) => {
-                self.available.update(&tx)?;
-                self.generated.push(tx);
-            }
-            Operation::CoverSpending(spending)
-            | Operation::Scheduled(spending)
-            | Operation::CoverEmergency(spending) => {
-                let covered = self
-                    .available
-                    .cover(&spending, self.today.as_ref().unwrap());
+            Operation::CoverSpending(spending) | Operation::CoverEmergency(spending) => {
+                let today = self.today.as_ref().unwrap();
+                let covered = self.available.cover(&spending, today);
 
                 if let Some(covered) = covered {
                     for tx in covered.transactions() {
-                        self.available.update(tx)?;
                         self.generated.push(tx.clone());
                     }
 
                     let ops = covered.clone().to_corrective_operations();
                     self.pending.extend(ops);
                 }
+            }
+            Operation::RefundedToAvailable(tx) | Operation::EnvelopeWithdrawal(tx) => {
+                self.generated.push(tx);
             }
         }
 
@@ -407,14 +449,13 @@ pub struct Command {
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let configuration = config::Configuration::load(&cmd.config)?;
 
-    let sorted = file.iter_transactions_in_order().collect::<Vec<_>>();
+    let sorted = file
+        .iter_transactions_in_order()
+        .filter(|t| !matches!(t.origin, Some(Origin::Generated)))
+        .collect::<Vec<_>>();
 
     let mut finances = Finances::new(&configuration)?;
-
-    for tx in sorted
-        .iter()
-        .filter(|t| !matches!(t.origin, Some(Origin::Generated)))
-    {
+    for tx in sorted.iter() {
         finances.handle(tx)?;
     }
 
@@ -427,6 +468,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             vec![Node::Transaction(tx), Node::EmptyLine]
         })
         .collect_vec();
+
     let mut writer = std::fs::File::create(&cmd.generated)?;
     let printer = Printer::default();
     printer.write_nodes(&mut writer, nodes.iter())?;
@@ -598,15 +640,11 @@ impl Operator for CoverSpending {
                 scheduled: None,
             };
 
-            if let Some(maximum) = maximum {
-                Ok(spending
-                    .scheduled(maximum.into())
-                    .into_iter()
-                    .map(Operation::Scheduled)
-                    .collect_vec())
-            } else {
-                Ok(vec![Operation::CoverSpending(spending)])
-            }
+            Ok(spending
+                .scheduled(maximum.map(|v| v.into()))
+                .into_iter()
+                .map(Operation::CoverSpending)
+                .collect_vec())
         } else {
             Ok(Vec::default())
         }
