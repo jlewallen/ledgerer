@@ -30,6 +30,12 @@ struct Spending {
     scheduled: Option<NaiveDate>,
 }
 
+impl std::fmt::Display for Spending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Spending({}, {})", self.total, self.envelope)
+    }
+}
+
 impl Spending {
     fn affects_emergency(&self) -> bool {
         self.original
@@ -97,7 +103,7 @@ impl TaxRule {
                     .flat_map(|p| p.only_positive().map(|v| v.abs()))
                     .sum::<BigDecimal>();
 
-                debug!("{:?} {:?}", total, rate);
+                // debug!("{:?} {:?}", total, rate);
 
                 Some(total.mul(rate).round(2))
             }
@@ -123,6 +129,24 @@ enum Operation {
     EnvelopeWithdrawal(Transaction),
     CoverSpending(Spending),
     CoverEmergency(Spending),
+}
+
+impl std::fmt::Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operation::AllocatePaycheck(tx, _) => write!(f, "{} Paycheck({})", tx.date, tx.payee),
+            Operation::RefundedToAvailable(tx) => write!(f, "{} Refund({})", tx.date, tx.payee),
+            Operation::EnvelopeWithdrawal(tx) => {
+                write!(f, "{} EnvelopeWithdrawal({})", tx.date, tx.payee)
+            }
+            Operation::CoverSpending(spending) => {
+                write!(f, "{} {}", spending.original.date, &spending)
+            }
+            Operation::CoverEmergency(spending) => {
+                write!(f, "{} Emergency({})", spending.original.date, &spending)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -378,7 +402,7 @@ impl Finances {
     }
 
     fn apply(&mut self, op: Operation) -> Result<()> {
-        trace!("{:?}", op);
+        debug!("{}", &op);
 
         assert!(self.can_apply(&op), "{:#?}", op);
 
