@@ -1,4 +1,5 @@
 use clap::Args;
+use colored::Colorize;
 use ellipse::Ellipse;
 use regex::Regex;
 use terminal_size::{terminal_size, Width};
@@ -24,7 +25,7 @@ struct Format {
     leading_width: usize,
     name_width: usize,
     value_width: usize,
-    cumulative_width: usize,
+    cumulative_width: Option<usize>,
 }
 
 impl Format {
@@ -38,9 +39,14 @@ impl Format {
 
         assert!(maximum_width >= 60);
 
-        let value_width = 60;
-        let cumulative_width = if cmd.cumulative { value_width } else { 0 };
-        let after_values = maximum_width - value_width - cumulative_width - fixed_spaces;
+        let value_width = 25;
+        let cumulative_width = if cmd.cumulative {
+            Some(value_width)
+        } else {
+            None
+        };
+        let after_values =
+            maximum_width - value_width - cumulative_width.unwrap_or_default() - fixed_spaces;
         let name_width = after_values / 2;
         let leading_width = after_values / 2;
 
@@ -49,6 +55,54 @@ impl Format {
             name_width,
             value_width,
             cumulative_width,
+        }
+    }
+}
+
+#[allow(dead_code)]
+struct Row<'r> {
+    first_posting: bool,
+    cleared: bool,
+    date: &'r NaiveDate,
+    payee: &'r str,
+    account: &'r AccountPath,
+    value: &'r Option<BigDecimal>,
+    cumulative: &'r BigDecimal,
+}
+
+impl<'r> Row<'r> {
+    fn format(self, format: &Format) -> String {
+        let prefix = match self.first_posting {
+            true => format!("{} {}", self.date, self.payee),
+            false => "".to_owned(),
+        };
+
+        let formatted_value = match self.value {
+            Some(value) => format!("{}", value),
+            None => "".to_owned(),
+        };
+
+        match format.cumulative_width {
+            Some(cumulative_width) => format!(
+                "{:leading_width$} {:name_width$} {:>value_width$} {:>cumulative_width$}",
+                prefix.as_str().truncate_ellipse(format.leading_width - 3),
+                self.account,
+                formatted_value,
+                self.cumulative.round(2),
+                leading_width = format.leading_width,
+                name_width = format.name_width,
+                value_width = format.value_width,
+                cumulative_width = cumulative_width,
+            ),
+            None => format!(
+                "{:leading_width$} {:name_width$} {:>value_width$}",
+                prefix.as_str().truncate_ellipse(format.leading_width - 3),
+                self.account,
+                formatted_value,
+                leading_width = format.leading_width,
+                name_width = format.name_width,
+                value_width = format.value_width,
+            ),
         }
     }
 }
@@ -85,47 +139,43 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             None => true,
         })
     {
-        let mut prefix = format!("{} {}", tx.date, tx.payee);
-        for posting in tx.postings.iter() {
-            if compiled
-                .as_ref()
-                .map_or(true, |c| c.is_match(posting.account.as_str()))
-            {
-                let formatted = match &posting.expression {
-                    Some(expression) => format!("{}", expression),
-                    _ => "".to_owned(),
-                };
+        for (i, posting) in tx
+            .postings
+            .iter()
+            .filter(|p| {
+                compiled
+                    .as_ref()
+                    .map_or(true, |c| c.is_match(p.account.as_str()))
+            })
+            .enumerate()
+        {
+            let value = match &posting.expression {
+                Some(expression) => expression.to_decimal(),
+                _ => None,
+            };
 
-                print!(
-                    "{:leading_width$} {:name_width$} {:>value_width$}",
-                    prefix.as_str().truncate_ellipse(format.leading_width - 3),
-                    posting.account,
-                    formatted,
-                    leading_width = format.leading_width,
-                    name_width = format.name_width,
-                    value_width = format.value_width,
-                );
-
-                let value = match &posting.expression {
-                    Some(expression) => expression.to_decimal(),
-                    _ => None,
-                };
-
-                if format.cumulative_width > 0 {
-                    if let Some(value) = value {
-                        cumulative += value;
-                        print!(
-                            "{:>cumulative_width$}",
-                            cumulative.round(2),
-                            cumulative_width = format.cumulative_width
-                        );
-                    }
-                }
-
-                println!();
-
-                prefix = "".to_owned();
+            if let Some(value) = value.as_ref() {
+                cumulative += value;
             }
+
+            let row = Row {
+                first_posting: i == 0,
+                cleared: tx.cleared,
+                date: &tx.date,
+                payee: &tx.payee,
+                account: &posting.account,
+                value: &value,
+                cumulative: &cumulative,
+            };
+
+            println!(
+                "{}",
+                if tx.cleared {
+                    row.format(&format).normal()
+                } else {
+                    row.format(&format).yellow()
+                }
+            );
         }
     }
 
