@@ -794,7 +794,7 @@ impl<'t> Transactions<'t> {
                 Some(mid) => format!("{} `{}` #{}#", description, self.tx.payee, mid),
                 None => format!("{} `{}`", description, self.tx.payee),
             },
-            cleared: true,
+            cleared: self.tx.cleared,
             postings: postings
                 .into_iter()
                 .map(|(account, value)| Posting {
