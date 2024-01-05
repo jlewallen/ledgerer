@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use clap::Args;
 use colored::Colorize;
 use ellipse::Ellipse;
@@ -15,10 +16,88 @@ pub struct Command {
     pub before: Option<String>,
     #[arg(short, long)]
     pub after: Option<String>,
-    #[arg(short, long)]
-    pub cumulative: bool,
+    #[arg(long)]
+    pub real: bool,
+    #[arg(long = "virtual")]
+    pub virt: bool,
+    #[arg(long)]
+    pub future: bool,
     #[arg(long)]
     pub width: Option<u16>,
+    #[arg(short, long)]
+    pub cumulative: bool,
+}
+
+impl Command {
+    fn filter(&self) -> Result<Filter> {
+        let before = optional_naive_to_pacific(&self.before)?.or_else(|| {
+            if self.future {
+                None
+            } else {
+                Some(Utc::now())
+            }
+        });
+        let after = optional_naive_to_pacific(&self.after)?;
+        let pattern = self
+            .pattern
+            .clone()
+            .map(|p| Regex::new(&p))
+            .map_or(Ok(None), |v| v.map(Some))?;
+        Ok(Filter {
+            cleared: self.cleared,
+            before,
+            after,
+            pattern,
+            real: self.real,
+            virt: self.virt,
+        })
+    }
+}
+
+pub(crate) struct Filter {
+    pub(crate) cleared: bool,
+    pub(crate) before: Option<DateTime<Utc>>,
+    pub(crate) after: Option<DateTime<Utc>>,
+    pub(crate) pattern: Option<Regex>,
+    pub(crate) real: bool,
+    pub(crate) virt: bool,
+}
+
+impl Filter {
+    pub(crate) fn matches_tx(&self, tx: &Transaction) -> bool {
+        let allow_before = match self.before {
+            Some(before) => naive_to_pacific(tx.date).unwrap() < before,
+            None => true,
+        };
+
+        let allow_after = match self.after {
+            Some(after) => {
+                if tx.date == NaiveDate::MIN {
+                    true
+                } else {
+                    naive_to_pacific(tx.date).unwrap() >= after
+                }
+            }
+            None => true,
+        };
+
+        let allow_cleared = !self.cleared || tx.cleared;
+
+        allow_cleared && allow_before && allow_after
+    }
+
+    pub(crate) fn matches_posting(&self, posting: &Posting) -> bool {
+        let allow_pattern = self
+            .pattern
+            .as_ref()
+            .map_or(true, |c| c.is_match(posting.account.as_str()));
+
+        let allow_real = !self.real || posting.account.is_real();
+
+        let allow_virtual = !self.virt || posting.account.is_virtual();
+
+        allow_pattern && allow_real && allow_virtual
+    }
 }
 
 struct Format {
@@ -108,45 +187,18 @@ impl<'r> Row<'r> {
 }
 
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
-    let after = optional_naive_to_pacific(&cmd.after)?;
-    let before = optional_naive_to_pacific(&cmd.before)?;
-
-    let compiled = cmd
-        .pattern
-        .clone()
-        .map(|p| Regex::new(&p))
-        .map_or(Ok(None), |v| v.map(Some))
-        .unwrap();
+    let filter = cmd.filter()?;
 
     let mut cumulative = BigDecimal::zero();
     let format = Format::new(cmd);
     for tx in file
         .iter_transactions_in_order()
-        .filter(|tx| !cmd.cleared || tx.cleared)
-        // This also happens in 'print' and it would be nice to avoid this duplication.
-        .filter(|tx| match before {
-            Some(before) => naive_to_pacific(tx.date).unwrap() < before,
-            None => true,
-        })
-        .filter(|tx| match after {
-            Some(after) => {
-                if tx.date == NaiveDate::MIN {
-                    true
-                } else {
-                    naive_to_pacific(tx.date).unwrap() >= after
-                }
-            }
-            None => true,
-        })
+        .filter(|tx| filter.matches_tx(tx))
     {
         for (i, posting) in tx
             .postings
             .iter()
-            .filter(|p| {
-                compiled
-                    .as_ref()
-                    .map_or(true, |c| c.is_match(p.account.as_str()))
-            })
+            .filter(|posting| filter.matches_posting(posting))
             .enumerate()
         {
             let value = match &posting.expression {

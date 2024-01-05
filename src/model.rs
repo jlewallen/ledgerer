@@ -37,6 +37,20 @@ impl AccountPath {
             AccountPath::Real(p) | AccountPath::Virtual(p) => p,
         }
     }
+
+    pub fn is_real(&self) -> bool {
+        match self {
+            AccountPath::Real(_) => true,
+            AccountPath::Virtual(_) => false,
+        }
+    }
+
+    pub fn is_virtual(&self) -> bool {
+        match self {
+            AccountPath::Real(_) => false,
+            AccountPath::Virtual(_) => true,
+        }
+    }
 }
 
 impl From<&str> for AccountPath {

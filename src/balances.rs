@@ -4,13 +4,24 @@ use regex::Regex;
 use serde::{ser::SerializeStruct, Serialize};
 use std::collections::{hash_map::Iter, HashMap};
 
-use crate::model::*;
+use crate::{model::*, print::optional_naive_to_pacific, register::Filter};
 
 #[derive(Debug, Args)]
 pub struct Command {
     pub pattern: Option<String>,
     #[arg(short, long)]
     pub cleared: bool,
+    #[arg(short, long)]
+    pub before: Option<String>,
+    #[arg(short, long)]
+    pub after: Option<String>,
+    #[arg(long)]
+    pub real: bool,
+    #[arg(long = "virtual")]
+    pub virt: bool,
+    #[arg(long)]
+    pub future: bool,
+
     #[arg(short, long)]
     pub actual: bool,
     #[arg(short, long)]
@@ -21,8 +32,32 @@ pub struct Command {
     pub json: bool,
     #[arg(long)]
     pub posting_format: bool,
-    #[arg(short, long)]
-    pub before: Option<String>,
+}
+
+impl Command {
+    fn filter(&self) -> Result<Filter> {
+        let before = optional_naive_to_pacific(&self.before)?.or_else(|| {
+            if self.future {
+                None
+            } else {
+                Some(Utc::now())
+            }
+        });
+        let after = optional_naive_to_pacific(&self.after)?;
+        let pattern = self
+            .pattern
+            .clone()
+            .map(|p| Regex::new(&p))
+            .map_or(Ok(None), |v| v.map(Some))?;
+        Ok(Filter {
+            cleared: self.cleared,
+            before,
+            after,
+            pattern,
+            real: self.real,
+            virt: self.virt,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -39,16 +74,6 @@ impl BalancesByAccount {
         Self { map }
     }
 
-    /*
-    pub fn keys(&self) -> Keys<String, Balances> {
-        self.map.keys()
-    }
-
-    pub fn get(&self, name: &str) -> Option<&Balances> {
-        self.map.get(name)
-    }
-    */
-
     pub fn iter(&self) -> Iter<String, Balances> {
         self.map.iter()
     }
@@ -56,49 +81,19 @@ impl BalancesByAccount {
 
 pub fn calculate_balances(file: &LedgerFile, cmd: &Command) -> anyhow::Result<BalancesByAccount> {
     let declared = file.declared_accounts();
-
-    let compiled = cmd
-        .pattern
-        .clone()
-        .map(|p| Regex::new(&p))
-        // YES! https://users.rust-lang.org/t/convenience-method-for-flipping-option-result-to-result-option/13695/10
-        // x.map_or(Ok(None), |v| v.map(Some))
-        .map_or(Ok(None), |v| v.map(Some))
-        .unwrap();
-
-    let before_naive_date = cmd
-        .before
-        .as_ref()
-        // Dislike this Error qualification.
-        .map_or(Ok::<_, anyhow::Error>(None), |o| {
-            Ok(Some(NaiveDate::parse_from_str(o, "%m/%d/%Y")?))
-        })?;
-
-    let before_date = before_naive_date
-        .map_or(Ok::<DateTime<Utc>, anyhow::Error>(Utc::now()), |nd| {
-            Ok(naive_to_pacific(nd)?.with_timezone(&Utc))
-        })?;
+    let filter = cmd.filter()?;
 
     let sorted = file
         .iter_transactions_in_order()
-        .filter(|t| !cmd.cleared || t.cleared)
+        .filter(|tx| filter.matches_tx(tx))
         .collect::<Vec<_>>();
 
-    let past_only = sorted
+    let by_path = sorted
         .iter()
-        .filter(|tx| naive_to_pacific(tx.date).unwrap() < before_date);
-
-    let by_path = past_only
         .flat_map(|tx| {
             tx.postings
                 .iter()
-                .filter(|p| {
-                    if let Some(compiled) = &compiled {
-                        compiled.is_match(p.account.as_str())
-                    } else {
-                        true
-                    }
-                })
+                .filter(|p| filter.matches_posting(p))
                 .filter_map(|p| {
                     p.into_balance()
                         .map(|b| (p.account.as_str(), Balances::new_from_balance(b)))
