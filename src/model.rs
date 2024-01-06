@@ -221,7 +221,7 @@ pub struct Transaction {
     pub refs: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
 pub enum Origin {
     File,
     Automatic,
@@ -457,11 +457,11 @@ impl AutomaticTransaction {
                     payee: tx.payee.clone(),
                     cleared: tx.cleared,
                     notes: self.notes.clone(),
-                    refs: Vec::default(),
+                    refs: vec![tx.mid.clone().unwrap()],
                     postings: self.postings_with_value(value),
                     origin: Some(Origin::Automatic),
+                    order: tx.order,
                     mid: None,
-                    order: None,
                 },
                 None => todo!(),
             })
@@ -672,7 +672,7 @@ impl LedgerFile {
 
     pub fn iter_transactions_in_order(&self) -> impl Iterator<Item = &Transaction> {
         let mut txs: Vec<&Transaction> = self.iter_transactions().collect();
-        txs.sort_unstable_by_key(|i| (i.date, i.order, i.specific_order(), &i.payee));
+        txs.sort_unstable_by_key(|i| (i.date, i.order, i.specific_order(), &i.origin, &i.payee));
         txs.into_iter()
     }
 
