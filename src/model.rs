@@ -221,7 +221,8 @@ pub struct Transaction {
     pub refs: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Origin {
     File,
     Automatic,
@@ -240,6 +241,9 @@ impl Serialize for Transaction {
         state.serialize_field("mid", &self.mid)?;
         state.serialize_field("notes", &self.notes)?;
         state.serialize_field("postings", &self.postings)?;
+        state.serialize_field("order", &self.order)?;
+        state.serialize_field("origin", &self.origin)?;
+        state.serialize_field("refs", &self.refs)?;
         state.end()
     }
 }
