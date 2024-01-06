@@ -150,7 +150,11 @@ fn lots_matching(lots: Vec<Lot>) -> impl Function {
             Ok(to_value(
                 lots.iter()
                     .map(|l| LotForTemplate {
-                        account: format!("assets:fidelity:roth:stocks:{}", l.symbol.to_lowercase()),
+                        account: format!(
+                            // TODO This should just move to the template.
+                            "MOVE-TO-TEMPLATE:{}",
+                            l.symbol.to_lowercase()
+                        ),
                         date: l.date.format("%Y/%m/%d").to_string(),
                         symbol: l.symbol.to_owned(),
                         quantity: format!("{}", l.quantity),
