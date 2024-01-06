@@ -37,9 +37,8 @@ impl std::fmt::Display for Spending {
 }
 
 impl Spending {
-    fn affects_emergency(&self) -> bool {
-        self.original
-            .has_posting_for("allocations:checking:savings:emergency")
+    fn affects_emergency(&self, names: &Names) -> bool {
+        self.original.has_posting_for(&names.emergency)
     }
 
     fn available(&self, date: NaiveDate, total: BigDecimal, names: &Names) -> Transaction {
@@ -247,7 +246,7 @@ impl Available {
     }
 
     fn cover(&self, spending: &Spending, today: &NaiveDate) -> Option<Covered> {
-        let emergency = !spending.affects_emergency();
+        let emergency = !spending.affects_emergency(&self.names);
         let remaining = spending.total.clone();
 
         let (early, remaining) = match spending.scheduled.as_ref() {
