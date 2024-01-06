@@ -264,6 +264,10 @@ impl Transaction {
         }
     }
 
+    pub fn is_generated(&self) -> bool {
+        self.notes.iter().any(|n| n.contains(":generated:"))
+    }
+
     pub fn specific_order(&self) -> Option<usize> {
         self.notes
             .iter()
@@ -389,6 +393,14 @@ impl Transaction {
             order: self.order,
             origin: origin.or(self.origin),
             refs: self.refs,
+        }
+    }
+
+    fn infer_origin_override(self) -> Self {
+        if self.is_generated() {
+            self.into_with_origin(Some(Origin::Generated))
+        } else {
+            self
         }
     }
 }
@@ -634,13 +646,6 @@ impl LedgerFile {
             .map_or(Err(anyhow!("Expected extension on path")), Ok)?
             .to_ascii_uppercase();
 
-        // TODO HACK
-        let origin = if name == "LALLOC" {
-            Some(Origin::Generated)
-        } else {
-            None
-        };
-
         let mut new_mid = mid_factory(&name);
         let our_order = order.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
@@ -651,9 +656,10 @@ impl LedgerFile {
                 Node::Transaction(tx) => Ok(Node::Transaction(
                     tx.into_with_mid(new_mid())
                         .into_with_order(our_order)
-                        .into_with_origin(origin.clone())
+                        .infer_origin_override()
                         .into_balanced()?,
                 )),
+
                 Node::Include(include_path_or_glob) => Ok(Node::Included(
                     include_path_or_glob.clone(),
                     include_glob(

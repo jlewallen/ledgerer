@@ -488,7 +488,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         .into_iter()
         .enumerate()
         .flat_map(|(i, mut tx)| {
-            tx.notes.push(format!(":order:{}", i));
+            tx.notes.push(format!(":generated:order:{}", i));
             vec![Node::Transaction(tx), Node::EmptyLine]
         })
         .collect_vec();

@@ -223,7 +223,12 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             println!(
                 "{}",
                 if tx.cleared {
-                    row.format(&format).normal()
+                    match tx.origin {
+                        Some(Origin::File) => row.format(&format).normal(),
+                        Some(Origin::Automatic) => row.format(&format).blue(),
+                        Some(Origin::Generated) => row.format(&format).cyan(),
+                        None => row.format(&format).normal(),
+                    }
                 } else {
                     row.format(&format).yellow()
                 }
