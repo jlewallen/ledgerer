@@ -202,7 +202,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             .enumerate()
         {
             let value = match &posting.expression {
-                Some(expression) => expression.to_decimal(),
+                Some(expression) => expression.to_decimal().map(|d| d.round(2)),
                 _ => None,
             };
 
