@@ -6,7 +6,9 @@ use std::io::Write;
 use crate::model::{CommodityExpression, LedgerFile};
 
 #[derive(Debug, Args)]
-pub struct Command {}
+pub struct Command {
+    symbol: Option<String>,
+}
 
 #[derive(Debug)]
 pub struct Lot {
@@ -16,7 +18,7 @@ pub struct Lot {
     pub price: Option<BigDecimal>,
 }
 
-pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> {
+pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let mut lots: Vec<Lot> = file
         .iter_transactions()
         .flat_map(|tx| {
@@ -41,7 +43,10 @@ pub fn execute_command(file: &LedgerFile, _cmd: &Command) -> anyhow::Result<()> 
 
     let mut writer = std::io::stdout();
 
-    for lot in lots {
+    for lot in lots
+        .into_iter()
+        .filter(|l| cmd.symbol.as_ref().map(|s| s == &l.symbol).unwrap_or(true))
+    {
         if let Some(price) = lot.price {
             writeln!(
                 writer,

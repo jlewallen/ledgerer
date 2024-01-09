@@ -21,7 +21,6 @@ pub struct Command {
     pub virt: bool,
     #[arg(long)]
     pub future: bool,
-
     #[arg(short, long)]
     pub actual: bool,
     #[arg(short, long)]
