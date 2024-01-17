@@ -1,7 +1,7 @@
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
 use clap::Args;
-use std::io::Write;
+use std::{io::Write, ops::Neg};
 
 use crate::model::{CommodityExpression, LedgerFile};
 
@@ -27,6 +27,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                     quantity,
                     symbol,
                     price,
+                    lot_price: _,
                     date,
                 })) => Some(Lot {
                     date: date.unwrap_or(tx.date),
@@ -39,7 +40,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         })
         .collect();
 
-    lots.sort_unstable_by_key(|lot| (lot.symbol.to_owned(), lot.date));
+    lots.sort_unstable_by_key(|lot| (lot.symbol.to_owned(), lot.date, lot.quantity.clone().neg()));
 
     let mut writer = std::io::stdout();
 
