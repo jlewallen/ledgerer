@@ -120,6 +120,7 @@ pub struct CommodityExpression {
     pub quantity: Numeric,
     pub symbol: String,
     pub price: Option<Numeric>,
+    pub lot_price: Option<Numeric>,
     pub date: Option<NaiveDate>,
 }
 
@@ -167,6 +168,7 @@ impl std::fmt::Display for Expression {
                     quantity,
                     symbol,
                     price: Some(price),
+                    lot_price: _,
                     date: None,
                 } => f.pad(&format!(
                     "{} {} @ {}",
@@ -178,12 +180,14 @@ impl std::fmt::Display for Expression {
                     quantity,
                     symbol,
                     price: None,
+                    lot_price: _,
                     date: None,
                 } => f.pad(&format!("{} {}", quantity.to_text_format(""), symbol)),
                 CommodityExpression {
                     quantity,
                     symbol,
                     price: Some(price),
+                    lot_price: _,
                     date: Some(date),
                 } => f.pad(&format!(
                     "{} {} @ {} [{}]",
@@ -196,6 +200,7 @@ impl std::fmt::Display for Expression {
                     quantity: _,
                     symbol: _,
                     price: None,
+                    lot_price: _,
                     date: Some(_),
                 } => unimplemented!(),
             },
@@ -622,7 +627,7 @@ impl LedgerFile {
             .collect_vec();
 
         let elapsed = Instant::now() - started;
-        info!("done in {:?}ms", elapsed);
+        info!("done in {:?}", elapsed);
 
         Ok(Self {
             path: self.path,

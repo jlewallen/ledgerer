@@ -59,7 +59,7 @@ fn main() -> Result<()> {
             .preprocess(Rc::new(AtomicU64::new(0)))?
             .apply_automatic_transactions()?;
         let elapsed = Instant::now() - started;
-        info!("loaded in {:?}ms", elapsed);
+        info!("loaded in {:?}", elapsed);
         Ok(loaded)
     };
 

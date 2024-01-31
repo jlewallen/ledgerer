@@ -65,6 +65,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                         quantity,
                         symbol,
                         price,
+                        lot_price: _,
                         date,
                     })) => Some(crate::lots::Lot {
                         date: date.unwrap_or(tx.date),

@@ -779,7 +779,60 @@ fn test_parse_transaction_with_mixed_commodities() -> Result<()> {
                         quantity: Numeric::Positive("100".into(), Some("00".into())),
                         symbol: "BS".into(),
                         price: None,
+                        lot_price: None,
                         date: None,
+                    })),
+                    note: None,
+                },
+                Posting {
+                    account: AccountPath::Real("equity:opening".into()),
+                    expression: None,
+                    note: None,
+                },
+            ]
+        }),]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_transaction_with_priced_and_dated_commodity_and_lot_price() -> Result<()> {
+    assert_eq!(
+        parse_str(
+            r"
+2023/04/09 opening
+    assets:fake            -100.00 BS {$5.00} @ $10.00 [2022/4/2]
+    assets:cash
+"
+            .trim_start()
+        )?,
+        vec![Node::Transaction(Transaction {
+            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+            payee: "opening".into(),
+            cleared: false,
+            mid: None,
+            order: None,
+            origin: Some(Origin::File),
+            notes: Vec::default(),
+            refs: Vec::default(),
+            postings: vec![
+                Posting {
+                    account: AccountPath::Real("assets:cash".into()),
+                    expression: Some(Expression::Literal(Numeric::Positive(
+                        "100".into(),
+                        Some("00".into())
+                    ))),
+                    note: None,
+                },
+                Posting {
+                    account: AccountPath::Real("assets:fake".into()),
+                    expression: Some(Expression::Commodity(CommodityExpression {
+                        quantity: Numeric::Positive("100".into(), Some("00".into())),
+                        symbol: "BS".into(),
+                        price: Some(Numeric::Positive("10".into(), Some("00".into()))),
+                        lot_price: Some(Numeric::Positive("5".into(), Some("00".into()))),
+                        date: Some(NaiveDate::from_ymd_opt(2022, 4, 2).unwrap()),
                     })),
                     note: None,
                 },
@@ -831,6 +884,7 @@ fn test_parse_transaction_with_priced_and_dated_commodity() -> Result<()> {
                         quantity: Numeric::Positive("100".into(), Some("00".into())),
                         symbol: "BS".into(),
                         price: Some(Numeric::Positive("10".into(), Some("00".into()))),
+                        lot_price: None,
                         date: Some(NaiveDate::from_ymd_opt(2022, 4, 2).unwrap()),
                     })),
                     note: None,
@@ -883,6 +937,7 @@ fn test_parse_transaction_with_priced_commodity() -> Result<()> {
                         quantity: Numeric::Positive("100".into(), Some("00".into())),
                         symbol: "BS".into(),
                         price: Some(Numeric::Positive("10".into(), Some("00".into()))),
+                        lot_price: None,
                         date: None,
                     })),
                     note: None,

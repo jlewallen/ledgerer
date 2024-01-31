@@ -165,6 +165,7 @@ fn basic_commodity(i: &str) -> IResult<&str, Expression> {
                 quantity,
                 symbol: symbol.into(),
                 price: details.as_ref().map(|d| d.1.clone()),
+                lot_price: None,
                 date: details.as_ref().and_then(|d| d.2),
             })
         },

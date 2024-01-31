@@ -10,7 +10,7 @@ use crate::{balances::naive_to_pacific, model::*, print::optional_naive_to_pacif
 #[derive(Debug, Args)]
 pub struct Command {
     pub pattern: Option<String>,
-    #[arg(short, long)]
+    #[arg(long)]
     pub cleared: bool,
     #[arg(short, long)]
     pub before: Option<String>,
