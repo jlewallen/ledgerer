@@ -18,6 +18,13 @@ fn test_parse_default_commodity() -> Result<()> {
 }
 
 #[test]
+fn test_parse_default_year() -> Result<()> {
+    assert_eq!(parse_str(r"year 2024")?, vec![Node::Year(2024)]);
+
+    Ok(())
+}
+
+#[test]
 fn test_parse_price() -> Result<()> {
     assert_eq!(
         parse_str(r"P 2021/1/29 BS $1000.00")?,
@@ -94,10 +101,348 @@ fn test_parse_transaction_below_comment() -> Result<()> {
         vec![
             Node::Comment(" Hello".to_owned()),
             Node::Comment("".to_owned()),
-            Node::Transaction(Transaction {
+            Node::ParsedTransaction(
+                Transaction {
+                    date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                    payee: "withdrawl".into(),
+                    cleared: false,
+                    mid: None,
+                    order: None,
+                    origin: Some(Origin::File),
+                    notes: Vec::default(),
+                    refs: Vec::default(),
+                    postings: vec![
+                        Posting {
+                            account: AccountPath::Real("assets:cash".into()),
+                            expression: Some(Expression::Literal(Numeric::Positive(
+                                "100".into(),
+                                Some("00".into())
+                            ))),
+                            note: None,
+                        },
+                        Posting {
+                            account: AccountPath::Real("assets:checking".into()),
+                            expression: Some(Expression::Literal(Numeric::Negative(
+                                "100".into(),
+                                Some("00".into())
+                            ))),
+                            note: None,
+                        },
+                    ]
+                }
+                .into()
+            )
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_transaction_basic_no_newline() -> Result<()> {
+    assert_eq!(
+        parse_str(
+            r"2023/04/09 withdrawl
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+        )?,
+        vec![Node::ParsedTransaction(
+            Transaction {
                 date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
                 payee: "withdrawl".into(),
                 cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::new(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_transaction_basic() -> Result<()> {
+    assert_eq!(
+        parse_str(
+            r"
+2023/04/09 withdrawl
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+            .trim_start()
+        )?,
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "withdrawl".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::new(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_transaction_basic_twice() -> Result<()> {
+    assert_eq!(
+        parse_str(
+            r"
+2023/04/09 withdrawl 1
+    assets:cash            $100.00
+    assets:checking       -$100.00
+
+2023/04/10 withdrawl 2
+    assets:cash            $100.00
+    assets:checking       -$100.00
+"
+            .trim_start()
+        )?,
+        vec![
+            Node::ParsedTransaction(
+                Transaction {
+                    date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                    payee: "withdrawl 1".into(),
+                    cleared: false,
+                    mid: None,
+                    order: None,
+                    origin: Some(Origin::File),
+                    notes: Vec::new(),
+                    refs: Vec::default(),
+                    postings: vec![
+                        Posting {
+                            account: AccountPath::Real("assets:cash".into()),
+                            expression: Some(Expression::Literal(Numeric::Positive(
+                                "100".into(),
+                                Some("00".into())
+                            ))),
+                            note: None,
+                        },
+                        Posting {
+                            account: AccountPath::Real("assets:checking".into()),
+                            expression: Some(Expression::Literal(Numeric::Negative(
+                                "100".into(),
+                                Some("00".into())
+                            ))),
+                            note: None,
+                        },
+                    ]
+                }
+                .into()
+            ),
+            Node::EmptyLine,
+            Node::ParsedTransaction(
+                Transaction {
+                    date: NaiveDate::from_ymd_opt(2023, 4, 10).unwrap(),
+                    payee: "withdrawl 2".into(),
+                    cleared: false,
+                    mid: None,
+                    order: None,
+                    origin: Some(Origin::File),
+                    notes: Vec::new(),
+                    refs: Vec::default(),
+                    postings: vec![
+                        Posting {
+                            account: AccountPath::Real("assets:cash".into()),
+                            expression: Some(Expression::Literal(Numeric::Positive(
+                                "100".into(),
+                                Some("00".into())
+                            ))),
+                            note: None,
+                        },
+                        Posting {
+                            account: AccountPath::Real("assets:checking".into()),
+                            expression: Some(Expression::Literal(Numeric::Negative(
+                                "100".into(),
+                                Some("00".into())
+                            ))),
+                            note: None,
+                        },
+                    ]
+                }
+                .into()
+            ),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_transaction_basic_with_whitespace_after_posting() -> Result<()> {
+    assert_eq!(
+        parse_str(
+            r"
+2023/04/09 income
+    income                      -$100.00    
+    assets:checking              $100.00
+"
+            .trim_start()
+        )?,
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "income".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::new(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("income".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_transaction_basic_with_virtual() -> Result<()> {
+    assert_eq!(
+        parse_str(
+            r"
+2023/04/09 income
+    income                      -$100.00
+    assets:checking              $100.00
+    [assets:checking:reserved]  -$100.00
+    [allocations:savings]        $100.00
+"
+            .trim_start()
+        )?,
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "income".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::new(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("income".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Virtual("assets:checking:reserved".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Virtual("allocations:savings".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_parse_transaction_basic_alternative_sign_location() -> Result<()> {
+    assert_eq!(
+        parse_str(
+            r"
+2023/04/09 * another example
+    assets:cash            $100.00
+    assets:checking       $-100.00
+"
+            .trim_start()
+        )?,
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "another example".into(),
+                cleared: true,
                 mid: None,
                 order: None,
                 origin: Some(Origin::File),
@@ -121,323 +466,9 @@ fn test_parse_transaction_below_comment() -> Result<()> {
                         note: None,
                     },
                 ]
-            })
-        ]
-    );
-
-    Ok(())
-}
-
-#[test]
-fn test_parse_transaction_basic_no_newline() -> Result<()> {
-    assert_eq!(
-        parse_str(
-            r"2023/04/09 withdrawl
-    assets:cash            $100.00
-    assets:checking       -$100.00
-"
-        )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "withdrawl".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::new(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        })]
-    );
-
-    Ok(())
-}
-
-#[test]
-fn test_parse_transaction_basic() -> Result<()> {
-    assert_eq!(
-        parse_str(
-            r"
-2023/04/09 withdrawl
-    assets:cash            $100.00
-    assets:checking       -$100.00
-"
-            .trim_start()
-        )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "withdrawl".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::new(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        })]
-    );
-
-    Ok(())
-}
-
-#[test]
-fn test_parse_transaction_basic_twice() -> Result<()> {
-    assert_eq!(
-        parse_str(
-            r"
-2023/04/09 withdrawl 1
-    assets:cash            $100.00
-    assets:checking       -$100.00
-
-2023/04/10 withdrawl 2
-    assets:cash            $100.00
-    assets:checking       -$100.00
-"
-            .trim_start()
-        )?,
-        vec![
-            Node::Transaction(Transaction {
-                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-                payee: "withdrawl 1".into(),
-                cleared: false,
-                mid: None,
-                order: None,
-                origin: Some(Origin::File),
-                notes: Vec::new(),
-                refs: Vec::default(),
-                postings: vec![
-                    Posting {
-                        account: AccountPath::Real("assets:cash".into()),
-                        expression: Some(Expression::Literal(Numeric::Positive(
-                            "100".into(),
-                            Some("00".into())
-                        ))),
-                        note: None,
-                    },
-                    Posting {
-                        account: AccountPath::Real("assets:checking".into()),
-                        expression: Some(Expression::Literal(Numeric::Negative(
-                            "100".into(),
-                            Some("00".into())
-                        ))),
-                        note: None,
-                    },
-                ]
-            }),
-            Node::EmptyLine,
-            Node::Transaction(Transaction {
-                date: NaiveDate::from_ymd_opt(2023, 4, 10).unwrap(),
-                payee: "withdrawl 2".into(),
-                cleared: false,
-                mid: None,
-                order: None,
-                origin: Some(Origin::File),
-                notes: Vec::new(),
-                refs: Vec::default(),
-                postings: vec![
-                    Posting {
-                        account: AccountPath::Real("assets:cash".into()),
-                        expression: Some(Expression::Literal(Numeric::Positive(
-                            "100".into(),
-                            Some("00".into())
-                        ))),
-                        note: None,
-                    },
-                    Posting {
-                        account: AccountPath::Real("assets:checking".into()),
-                        expression: Some(Expression::Literal(Numeric::Negative(
-                            "100".into(),
-                            Some("00".into())
-                        ))),
-                        note: None,
-                    },
-                ]
-            }),
-        ]
-    );
-
-    Ok(())
-}
-
-#[test]
-fn test_parse_transaction_basic_with_whitespace_after_posting() -> Result<()> {
-    assert_eq!(
-        parse_str(
-            r"
-2023/04/09 income
-    income                      -$100.00    
-    assets:checking              $100.00
-"
-            .trim_start()
-        )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "income".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::new(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("income".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        })]
-    );
-
-    Ok(())
-}
-
-#[test]
-fn test_parse_transaction_basic_with_virtual() -> Result<()> {
-    assert_eq!(
-        parse_str(
-            r"
-2023/04/09 income
-    income                      -$100.00
-    assets:checking              $100.00
-    [assets:checking:reserved]  -$100.00
-    [allocations:savings]        $100.00
-"
-            .trim_start()
-        )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "income".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::new(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("income".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Virtual("assets:checking:reserved".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Virtual("allocations:savings".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        }),]
-    );
-
-    Ok(())
-}
-
-#[test]
-fn test_parse_transaction_basic_alternative_sign_location() -> Result<()> {
-    assert_eq!(
-        parse_str(
-            r"
-2023/04/09 * another example
-    assets:cash            $100.00
-    assets:checking       $-100.00
-"
-            .trim_start()
-        )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "another example".into(),
-            cleared: true,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        }),]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -454,34 +485,37 @@ fn test_parse_transaction_basic_cleared() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "withdrawl with more text".into(),
-            cleared: true,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "withdrawl with more text".into(),
+                cleared: true,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -498,31 +532,34 @@ fn test_parse_transaction_with_catchall_posting_last() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "withdrawl".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: None,
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "withdrawl".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: None,
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -539,31 +576,34 @@ fn test_parse_transaction_with_catchall_posting_first() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "withdrawl".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: None,
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "withdrawl".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: None,
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -581,34 +621,37 @@ fn test_parse_transaction_with_note() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "withdrawl".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: vec!["hello-world".to_owned()],
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "withdrawl".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: vec!["hello-world".to_owned()],
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -625,34 +668,37 @@ fn test_parse_transaction_with_posting_with_note() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "withdrawl".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: Some("hello-world".into()),
-                },
-                Posting {
-                    account: AccountPath::Real("assets:checking".into()),
-                    expression: Some(Expression::Literal(Numeric::Negative(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "withdrawl".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: Some("hello-world".into()),
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:checking".into()),
+                        expression: Some(Expression::Literal(Numeric::Negative(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -755,42 +801,45 @@ fn test_parse_transaction_with_mixed_commodities() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "opening".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:fake".into()),
-                    expression: Some(Expression::Commodity(CommodityExpression {
-                        quantity: Numeric::Positive("100".into(), Some("00".into())),
-                        symbol: "BS".into(),
-                        price: None,
-                        lot_price: None,
-                        date: None,
-                    })),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("equity:opening".into()),
-                    expression: None,
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "opening".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:fake".into()),
+                        expression: Some(Expression::Commodity(CommodityExpression {
+                            quantity: Numeric::Positive("100".into(), Some("00".into())),
+                            symbol: "BS".into(),
+                            price: None,
+                            lot_price: None,
+                            date: None,
+                        })),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("equity:opening".into()),
+                        expression: None,
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -803,46 +852,44 @@ fn test_parse_transaction_with_priced_and_dated_commodity_and_lot_price() -> Res
             r"
 2023/04/09 opening
     assets:fake            -100.00 BS {$5.00} @ $10.00 [2022/4/2]
-    assets:cash
+    assets:cash             100.00
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "opening".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:fake".into()),
-                    expression: Some(Expression::Commodity(CommodityExpression {
-                        quantity: Numeric::Positive("100".into(), Some("00".into())),
-                        symbol: "BS".into(),
-                        price: Some(Numeric::Positive("10".into(), Some("00".into()))),
-                        lot_price: Some(Numeric::Positive("5".into(), Some("00".into()))),
-                        date: Some(NaiveDate::from_ymd_opt(2022, 4, 2).unwrap()),
-                    })),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("equity:opening".into()),
-                    expression: None,
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "opening".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:fake".into()),
+                        expression: Some(Expression::Commodity(CommodityExpression {
+                            quantity: Numeric::Negative("100".into(), Some("00".into())),
+                            symbol: "BS".into(),
+                            price: Some(Numeric::Positive("10".into(), Some("00".into()))),
+                            lot_price: Some(Numeric::Positive("5".into(), Some("00".into()))),
+                            date: Some(NaiveDate::from_ymd_opt(2022, 4, 2).unwrap()),
+                        })),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -860,42 +907,45 @@ fn test_parse_transaction_with_priced_and_dated_commodity() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "opening".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:fake".into()),
-                    expression: Some(Expression::Commodity(CommodityExpression {
-                        quantity: Numeric::Positive("100".into(), Some("00".into())),
-                        symbol: "BS".into(),
-                        price: Some(Numeric::Positive("10".into(), Some("00".into()))),
-                        lot_price: None,
-                        date: Some(NaiveDate::from_ymd_opt(2022, 4, 2).unwrap()),
-                    })),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("equity:opening".into()),
-                    expression: None,
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "opening".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:fake".into()),
+                        expression: Some(Expression::Commodity(CommodityExpression {
+                            quantity: Numeric::Positive("100".into(), Some("00".into())),
+                            symbol: "BS".into(),
+                            price: Some(Numeric::Positive("10".into(), Some("00".into()))),
+                            lot_price: None,
+                            date: Some(NaiveDate::from_ymd_opt(2022, 4, 2).unwrap()),
+                        })),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("equity:opening".into()),
+                        expression: None,
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())
@@ -913,42 +963,45 @@ fn test_parse_transaction_with_priced_commodity() -> Result<()> {
 "
             .trim_start()
         )?,
-        vec![Node::Transaction(Transaction {
-            date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
-            payee: "opening".into(),
-            cleared: false,
-            mid: None,
-            order: None,
-            origin: Some(Origin::File),
-            notes: Vec::default(),
-            refs: Vec::default(),
-            postings: vec![
-                Posting {
-                    account: AccountPath::Real("assets:cash".into()),
-                    expression: Some(Expression::Literal(Numeric::Positive(
-                        "100".into(),
-                        Some("00".into())
-                    ))),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("assets:fake".into()),
-                    expression: Some(Expression::Commodity(CommodityExpression {
-                        quantity: Numeric::Positive("100".into(), Some("00".into())),
-                        symbol: "BS".into(),
-                        price: Some(Numeric::Positive("10".into(), Some("00".into()))),
-                        lot_price: None,
-                        date: None,
-                    })),
-                    note: None,
-                },
-                Posting {
-                    account: AccountPath::Real("equity:opening".into()),
-                    expression: None,
-                    note: None,
-                },
-            ]
-        }),]
+        vec![Node::ParsedTransaction(
+            Transaction {
+                date: NaiveDate::from_ymd_opt(2023, 4, 9).unwrap(),
+                payee: "opening".into(),
+                cleared: false,
+                mid: None,
+                order: None,
+                origin: Some(Origin::File),
+                notes: Vec::default(),
+                refs: Vec::default(),
+                postings: vec![
+                    Posting {
+                        account: AccountPath::Real("assets:cash".into()),
+                        expression: Some(Expression::Literal(Numeric::Positive(
+                            "100".into(),
+                            Some("00".into())
+                        ))),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("assets:fake".into()),
+                        expression: Some(Expression::Commodity(CommodityExpression {
+                            quantity: Numeric::Positive("100".into(), Some("00".into())),
+                            symbol: "BS".into(),
+                            price: Some(Numeric::Positive("10".into(), Some("00".into()))),
+                            lot_price: None,
+                            date: None,
+                        })),
+                        note: None,
+                    },
+                    Posting {
+                        account: AccountPath::Real("equity:opening".into()),
+                        expression: None,
+                        note: None,
+                    },
+                ]
+            }
+            .into()
+        )]
     );
 
     Ok(())

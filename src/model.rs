@@ -12,6 +12,7 @@ use std::{
     sync::atomic::AtomicU64,
     time::Instant,
 };
+use thiserror::Error;
 use tracing::{debug, info, span, Level};
 
 pub use anyhow::Result;
@@ -210,6 +211,72 @@ impl std::fmt::Display for Expression {
             },
             Expression::Calculated(_) => f.pad(""),
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ParsedDate {
+    YearMonthDate(NaiveDate),
+    MonthDay(u32, u32),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ParsedTransaction {
+    pub date: ParsedDate,
+    pub payee: String,
+    pub cleared: bool,
+    pub postings: Vec<Posting>,
+    pub notes: Vec<String>,
+    pub mid: Option<String>,
+    pub order: Option<u64>, // Torn on this, need a way to maintain "file order"
+    pub origin: Option<Origin>,
+    pub refs: Vec<String>,
+}
+
+impl From<Transaction> for ParsedTransaction {
+    fn from(value: Transaction) -> Self {
+        Self {
+            date: ParsedDate::YearMonthDate(value.date),
+            payee: value.payee,
+            cleared: value.cleared,
+            postings: value.postings,
+            notes: value.notes,
+            mid: value.mid,
+            order: value.order,
+            origin: value.origin,
+            refs: value.refs,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum TransactionError {
+    #[error("no year for month and day date")]
+    NoYear,
+    #[error("bad date")]
+    BadDate,
+}
+
+impl ParsedTransaction {
+    pub fn try_into_tx(self, year: Option<i32>) -> Result<Transaction, TransactionError> {
+        Ok(Transaction {
+            date: match self.date {
+                ParsedDate::YearMonthDate(date) => date,
+                ParsedDate::MonthDay(month, day) => match year {
+                    Some(year) => NaiveDate::from_ymd_opt(year, month, day)
+                        .ok_or(TransactionError::BadDate)?,
+                    None => Err(TransactionError::NoYear)?,
+                },
+            },
+            payee: self.payee,
+            cleared: self.cleared,
+            postings: self.postings,
+            notes: self.notes,
+            mid: self.mid,
+            order: self.order,
+            origin: self.origin,
+            refs: self.refs,
+        })
     }
 }
 
@@ -541,6 +608,7 @@ pub struct DatedPrice {
 pub enum Node {
     Comment(String),
     Transaction(Transaction),
+    ParsedTransaction(ParsedTransaction),
     AccountDeclaration(AccountPath),
     TagDeclaration(String),
     Include(String),
@@ -550,6 +618,7 @@ pub enum Node {
     DatedPrice(DatedPrice),
     CommodityDeclaration(String),
     AutomaticTransaction(AutomaticTransaction),
+    Year(i32),
     EmptyLine,
 }
 
@@ -653,18 +722,23 @@ impl LedgerFile {
 
         let mut new_mid = mid_factory(&name);
         let our_order = order.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut current_year = None;
 
         let nodes = self
             .nodes
             .into_iter()
             .map(|node| match node {
-                Node::Transaction(tx) => Ok(Node::Transaction(
-                    tx.into_with_mid(new_mid())
+                Node::Year(year) => {
+                    current_year = Some(year);
+                    Ok(node)
+                }
+                Node::ParsedTransaction(tx) => Ok(Node::Transaction(
+                    tx.try_into_tx(current_year)?
+                        .into_with_mid(new_mid())
                         .into_with_order(our_order)
                         .infer_origin_override()
                         .into_balanced()?,
                 )),
-
                 Node::Include(include_path_or_glob) => Ok(Node::Included(
                     include_path_or_glob.clone(),
                     include_glob(

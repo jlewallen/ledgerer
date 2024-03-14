@@ -90,7 +90,7 @@ fn parse_transaction(i: &str) -> IResult<&str, Node> {
     map(
         pair(
             tuple((
-                date_string,
+                parsed_date_string,
                 opt(preceded(linespace1, tag("*"))),
                 preceded(linespace1, terminated(payee, newline)),
             )),
@@ -104,7 +104,7 @@ fn parse_transaction(i: &str) -> IResult<&str, Node> {
             ),
         ),
         |((date, cleared, payee), (notes, postings))| {
-            Node::Transaction(Transaction {
+            Node::ParsedTransaction(ParsedTransaction {
                 date,
                 payee: payee.to_string(),
                 cleared: cleared.is_some(),
@@ -151,22 +151,26 @@ fn basic_commodity(i: &str) -> IResult<&str, Expression> {
         tuple((
             numeric_literal,
             preceded(linespace1, symbol),
-            opt(tuple((
+            opt(preceded(
+                linespace1,
+                delimited(tag("{"), numeric_literal, tag("}")),
+            )),
+            opt(preceded(
                 tuple((linespace1, tag("@"), linespace1)),
                 numeric_literal,
-                opt(preceded(
-                    linespace1,
-                    delimited(tag("["), date_string, tag("]")),
-                )),
-            ))),
+            )),
+            opt(preceded(
+                linespace1,
+                delimited(tag("["), date_string, tag("]")),
+            )),
         )),
-        |(quantity, symbol, details)| {
+        |(quantity, symbol, maybe_lot_price, maybe_price, maybe_date)| {
             Expression::Commodity(CommodityExpression {
                 quantity,
                 symbol: symbol.into(),
-                price: details.as_ref().map(|d| d.1.clone()),
-                lot_price: None,
-                date: details.as_ref().and_then(|d| d.2),
+                lot_price: maybe_lot_price.as_ref().map(|d| d.clone()),
+                price: maybe_price.as_ref().map(|d| d.clone()),
+                date: maybe_date.map(|d| d),
             })
         },
     )(i)
@@ -274,6 +278,16 @@ fn parse_commodity_declaration(i: &str) -> IResult<&str, Node> {
     )(i)
 }
 
+fn parse_year(i: &str) -> IResult<&str, Node> {
+    map(
+        terminated(
+            preceded(tuple((tag("year"), linespace1)), unparsed_unsigned_number),
+            opt(newline),
+        ),
+        |year| Node::Year(year.parse().unwrap()),
+    )(i)
+}
+
 fn remaining_text(i: &str) -> IResult<&str, &str> {
     take_while(move |c: char| !character::is_newline(c as u8))(i)
 }
@@ -315,6 +329,7 @@ fn parse_directive(i: &str) -> IResult<&str, Node> {
         parse_dated_price,
         parse_commodity_declaration,
         parse_automatic_transaction,
+        parse_year,
     ))(i)
 }
 
@@ -349,4 +364,18 @@ fn date_string(i: &str) -> IResult<&str, NaiveDate> {
             NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32).expect("Invalid date")
         },
     )(i)
+}
+
+fn month_day_string(i: &str) -> IResult<&str, ParsedDate> {
+    map(
+        separated_pair(unsigned_number, tag("/"), unsigned_number),
+        |(month, day)| ParsedDate::MonthDay(month as u32, day as u32),
+    )(i)
+}
+
+fn parsed_date_string(i: &str) -> IResult<&str, ParsedDate> {
+    alt((
+        map(date_string, |v| ParsedDate::YearMonthDate(v)),
+        month_day_string,
+    ))(i)
 }
