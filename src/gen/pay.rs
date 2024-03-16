@@ -14,7 +14,9 @@ use serde_json::Value;
 use tera::{Context, Function, Tera};
 use thiserror::Error;
 
-use crate::model::{AccountPath, Expression, LedgerFile, Numeric, Origin, Posting, Transaction};
+use crate::model::{
+    AccountPath, Expression, LedgerFile, Numeric, Origin, ParsedDate, Posting, Transaction,
+};
 
 use super::{config::Names, TaxRule, Taxes};
 
@@ -128,7 +130,7 @@ impl AllocatedPay {
         available: Posting,
     ) -> Result<Vec<Transaction>> {
         Ok(vec![Transaction {
-            date: self.date,
+            date: ParsedDate::Full(self.date),
             payee: "income allocation".to_owned(),
             cleared: true,
             mid: None,

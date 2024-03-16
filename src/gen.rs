@@ -67,7 +67,10 @@ impl Spending {
                 total: payment,
                 envelope: self.envelope.clone(),
                 original: self.original.clone(),
-                scheduled: self.original.date.checked_add_months(Months::new(i as u32)),
+                scheduled: self
+                    .original
+                    .date()
+                    .checked_add_months(Months::new(i as u32)),
             })
             .collect_vec()
     }
@@ -133,16 +136,16 @@ enum Operation {
 impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Operation::AllocatePaycheck(tx, _) => write!(f, "{} Paycheck({})", tx.date, tx.payee),
-            Operation::RefundedToAvailable(tx) => write!(f, "{} Refund({})", tx.date, tx.payee),
+            Operation::AllocatePaycheck(tx, _) => write!(f, "{} Paycheck({})", tx.date(), tx.payee),
+            Operation::RefundedToAvailable(tx) => write!(f, "{} Refund({})", tx.date(), tx.payee),
             Operation::EnvelopeWithdrawal(tx) => {
-                write!(f, "{} EnvelopeWithdrawal({})", tx.date, tx.payee)
+                write!(f, "{} EnvelopeWithdrawal({})", tx.date(), tx.payee)
             }
             Operation::CoverSpending(spending) => {
-                write!(f, "{} {}", spending.original.date, &spending)
+                write!(f, "{} {}", spending.original.date(), &spending)
             }
             Operation::CoverEmergency(spending) => {
-                write!(f, "{} Emergency({})", spending.original.date, &spending)
+                write!(f, "{} Emergency({})", spending.original.date(), &spending)
             }
         }
     }
@@ -374,7 +377,7 @@ impl Finances {
             .into_iter()
             .flatten();
 
-        self.today = Some(tx.date);
+        self.today = Some(tx.date().clone());
         self.available.update(tx);
 
         for op in ops {
@@ -531,7 +534,7 @@ impl Operator for AllocatePaycheck {
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>> {
         debug!("{:?} {}", tx.date, tx.payee);
 
-        let template = pay::PaycheckTemplate::new(self.income.name(), tx.date);
+        let template = pay::PaycheckTemplate::new(self.income.name(), tx.date().clone());
         let paycheck = template.generate(tx)?;
         let cycle = self.income.cycle();
         let transactions = paycheck.transactions(cycle, &self.names)?;
@@ -575,7 +578,8 @@ impl Operator for RefundMoney {
             Ok(Vec::default())
         } else {
             Ok(vec![Operation::RefundedToAvailable(
-                Transactions::new(tx.date, &self.names, tx).make_refund(refunded.into_iter())?,
+                Transactions::new(tx.date().clone(), &self.names, tx)
+                    .make_refund(refunded.into_iter())?,
             )])
         }
     }
@@ -600,7 +604,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
             .sum();
 
         let envelope: AccountPath = self.config.name.as_str().into();
-        let envelope_withdrawal = Transactions::new(tx.date, &self.names, tx)
+        let envelope_withdrawal = Transactions::new(tx.date().clone(), &self.names, tx)
             .make_envelope_withdrawal(vec![(envelope.clone(), total.clone())].into_iter())?;
 
         if total.is_positive() {
@@ -616,7 +620,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
                 Operation::CoverSpending(spending),
             ])
         } else {
-            let refund = Transactions::new(tx.date, &self.names, tx)
+            let refund = Transactions::new(tx.date().clone(), &self.names, tx)
                 .make_refund(vec![(envelope.clone(), -total)].into_iter())?;
 
             Ok(vec![
@@ -788,7 +792,7 @@ impl<'t> Transactions<'t> {
         postings: impl Iterator<Item = (AccountPath, BigDecimal)>,
     ) -> Result<Transaction> {
         Transaction {
-            date: self.date,
+            date: crate::model::ParsedDate::Full(self.date),
             payee: match self.tx.mid.as_ref() {
                 Some(mid) => format!("{} `{}` #{}#", description, self.tx.payee, mid),
                 None => format!("{} `{}`", description, self.tx.payee),

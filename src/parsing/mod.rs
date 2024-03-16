@@ -104,7 +104,7 @@ fn parse_transaction(i: &str) -> IResult<&str, Node> {
             ),
         ),
         |((date, cleared, payee), (notes, postings))| {
-            Node::ParsedTransaction(ParsedTransaction {
+            Node::Transaction(Transaction {
                 date,
                 payee: payee.to_string(),
                 cleared: cleared.is_some(),
@@ -374,8 +374,5 @@ fn month_day_string(i: &str) -> IResult<&str, ParsedDate> {
 }
 
 fn parsed_date_string(i: &str) -> IResult<&str, ParsedDate> {
-    alt((
-        map(date_string, |v| ParsedDate::YearMonthDate(v)),
-        month_day_string,
-    ))(i)
+    alt((map(date_string, |v| ParsedDate::Full(v)), month_day_string))(i)
 }

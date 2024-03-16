@@ -56,7 +56,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             .iter_transactions()
             .filter(|tx| {
                 before_naive_date
-                    .map(|before| tx.date < before)
+                    .map(|before| tx.date() < &before)
                     .unwrap_or(true)
             })
             .flat_map(|tx| {
@@ -68,7 +68,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                         lot_price: _,
                         date,
                     })) => Some(crate::lots::Lot {
-                        date: date.unwrap_or(tx.date),
+                        date: date.unwrap_or(tx.date().clone()),
                         symbol: symbol.to_owned(),
                         quantity: quantity.to_decimal(),
                         price: price.as_ref().map(|e| e.to_decimal()),

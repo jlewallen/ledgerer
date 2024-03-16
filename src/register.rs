@@ -66,16 +66,16 @@ pub(crate) struct Filter {
 impl Filter {
     pub(crate) fn matches_tx(&self, tx: &Transaction) -> bool {
         let allow_before = match self.before {
-            Some(before) => naive_to_pacific(tx.date).unwrap() < before,
+            Some(before) => naive_to_pacific(tx.date().clone()).unwrap() < before,
             None => true,
         };
 
         let allow_after = match self.after {
             Some(after) => {
-                if tx.date == NaiveDate::MIN {
+                if tx.date() == &NaiveDate::MIN {
                     true
                 } else {
-                    naive_to_pacific(tx.date).unwrap() >= after
+                    naive_to_pacific(tx.date().clone()).unwrap() >= after
                 }
             }
             None => true,
@@ -213,7 +213,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
             let row = Row {
                 first_posting: i == 0,
                 cleared: tx.cleared,
-                date: &tx.date,
+                date: tx.date(),
                 payee: &tx.payee,
                 account: &posting.account,
                 value: &value,

@@ -216,8 +216,15 @@ impl std::fmt::Display for Expression {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ParsedDate {
-    YearMonthDate(NaiveDate),
+    Full(NaiveDate),
     MonthDay(u32, u32),
+    QualifiedMonthDay(NaiveDate),
+}
+
+impl From<NaiveDate> for ParsedDate {
+    fn from(value: NaiveDate) -> Self {
+        Self::Full(value)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -236,7 +243,7 @@ pub struct ParsedTransaction {
 impl From<Transaction> for ParsedTransaction {
     fn from(value: Transaction) -> Self {
         Self {
-            date: ParsedDate::YearMonthDate(value.date),
+            date: value.date,
             payee: value.payee,
             cleared: value.cleared,
             postings: value.postings,
@@ -257,14 +264,17 @@ pub enum TransactionError {
     BadDate,
 }
 
-impl ParsedTransaction {
-    pub fn try_into_tx(self, year: Option<i32>) -> Result<Transaction, TransactionError> {
+impl Transaction {
+    pub fn qualify_year(self, year: Option<i32>) -> Result<Transaction, TransactionError> {
         Ok(Transaction {
             date: match self.date {
-                ParsedDate::YearMonthDate(date) => date,
+                ParsedDate::Full(date) => ParsedDate::Full(date),
+                ParsedDate::QualifiedMonthDay(date) => ParsedDate::QualifiedMonthDay(date),
                 ParsedDate::MonthDay(month, day) => match year {
-                    Some(year) => NaiveDate::from_ymd_opt(year, month, day)
-                        .ok_or(TransactionError::BadDate)?,
+                    Some(year) => ParsedDate::QualifiedMonthDay(
+                        NaiveDate::from_ymd_opt(year, month, day)
+                            .ok_or(TransactionError::BadDate)?,
+                    ),
                     None => Err(TransactionError::NoYear)?,
                 },
             },
@@ -282,7 +292,7 @@ impl ParsedTransaction {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Transaction {
-    pub date: NaiveDate,
+    pub date: ParsedDate,
     pub payee: String,
     pub cleared: bool,
     pub postings: Vec<Posting>,
@@ -321,6 +331,14 @@ impl Serialize for Transaction {
 }
 
 impl Transaction {
+    pub fn date(&self) -> &NaiveDate {
+        match &self.date {
+            ParsedDate::Full(date) => date,
+            ParsedDate::QualifiedMonthDay(date) => &date,
+            ParsedDate::MonthDay(_, _) => todo!(),
+        }
+    }
+
     pub fn is_simple(&self) -> bool {
         !self.postings.iter().any(|p| p.has_value().is_none())
     }
@@ -416,7 +434,7 @@ impl Transaction {
             if !total.is_zero() {
                 Err(anyhow!(
                     "Unbalanced transaction: {} '{}' ~ {}!",
-                    &self.date,
+                    self.date(),
                     self.payee,
                     total
                 ))
@@ -541,7 +559,7 @@ impl AutomaticTransaction {
         tx.iter_postings_for(&self.condition)
             .map(|p| match p.has_value() {
                 Some(value) => Transaction {
-                    date: tx.date,
+                    date: tx.date.clone(),
                     payee: tx.payee.clone(),
                     cleared: tx.cleared,
                     notes: self.notes.clone(),
@@ -608,7 +626,6 @@ pub struct DatedPrice {
 pub enum Node {
     Comment(String),
     Transaction(Transaction),
-    ParsedTransaction(ParsedTransaction),
     AccountDeclaration(AccountPath),
     TagDeclaration(String),
     Include(String),
@@ -732,8 +749,8 @@ impl LedgerFile {
                     current_year = Some(year);
                     Ok(node)
                 }
-                Node::ParsedTransaction(tx) => Ok(Node::Transaction(
-                    tx.try_into_tx(current_year)?
+                Node::Transaction(tx) => Ok(Node::Transaction(
+                    tx.qualify_year(current_year)?
                         .into_with_mid(new_mid())
                         .into_with_order(our_order)
                         .infer_origin_override()
@@ -761,7 +778,7 @@ impl LedgerFile {
 
     pub fn iter_transactions_in_order(&self) -> impl Iterator<Item = &Transaction> {
         let mut txs: Vec<&Transaction> = self.iter_transactions().collect();
-        txs.sort_unstable_by_key(|i| (i.date, i.order, i.specific_order(), &i.origin, &i.payee));
+        txs.sort_unstable_by_key(|i| (i.date(), i.order, i.specific_order(), &i.origin, &i.payee));
         txs.into_iter()
     }
 
@@ -887,7 +904,7 @@ pub fn sortable_nodes<'a>(
 ) -> impl Iterator<Item = SortedNode<'a>> {
     i.scan((NaiveDate::MIN, 0), |acc, node| {
         let node_date: Option<NaiveDate> = match node {
-            Node::Transaction(tx) => Some(tx.date),
+            Node::Transaction(tx) => Some(tx.date().clone()),
             Node::DatedPrice(p) => Some(p.date),
             _ => None,
         };

@@ -50,42 +50,13 @@ impl Printer {
             Node::Comment(text) => {
                 writeln!(w, ";{}", text)
             }
-            Node::ParsedTransaction(tx) => {
-                match tx.date {
-                    ParsedDate::YearMonthDate(date) => write!(w, "{} ", date.format("%Y/%m/%d"))?,
-                    ParsedDate::MonthDay(month, day) => write!(w, "{}/{} ", month, day)?,
-                }
-
-                if tx.cleared {
-                    write!(w, "* ")?;
-                }
-                writeln!(w, "{}", tx.payee)?;
-                for n in tx.notes.iter() {
-                    write!(w, "{}", &prefix)?;
-                    writeln!(w, "; {}", n)?;
-                }
-                for p in tx.postings.iter() {
-                    write!(w, "{}", &prefix)?;
-                    match &p.expression {
-                        Some(Expression::Calculated(_)) | None => {
-                            write!(w, "{}", p.account)?;
-                        }
-                        Some(expression) => {
-                            write!(w, "{:76}", p.account)?;
-                            write!(w, "{:>20}", expression)?;
-                        }
-                    };
-
-                    match &p.note {
-                        Some(note) => writeln!(w, " ; {}", note)?,
-                        None => writeln!(w)?,
-                    };
-                }
-
-                Ok(())
-            }
             Node::Transaction(tx) => {
-                write!(w, "{} ", tx.date.format("%Y/%m/%d"))?;
+                match tx.date {
+                    ParsedDate::Full(date) => write!(w, "{} ", date.format("%Y/%m/%d"))?,
+                    ParsedDate::MonthDay(month, day) => write!(w, "{}/{} ", month, day)?,
+                    ParsedDate::QualifiedMonthDay(date) => write!(w, "{} ", date.format("%m/%d"))?,
+                }
+
                 if tx.cleared {
                     write!(w, "* ")?;
                 }
