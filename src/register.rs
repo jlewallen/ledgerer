@@ -66,7 +66,7 @@ pub(crate) struct Filter {
 impl Filter {
     pub(crate) fn matches_tx(&self, tx: &Transaction) -> bool {
         let allow_before = match self.before {
-            Some(before) => naive_to_pacific(tx.date().clone()).unwrap() < before,
+            Some(before) => naive_to_pacific(*tx.date()).unwrap() < before,
             None => true,
         };
 
@@ -75,7 +75,7 @@ impl Filter {
                 if tx.date() == &NaiveDate::MIN {
                     true
                 } else {
-                    naive_to_pacific(tx.date().clone()).unwrap() >= after
+                    naive_to_pacific(*tx.date()).unwrap() >= after
                 }
             }
             None => true,

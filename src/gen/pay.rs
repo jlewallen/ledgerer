@@ -305,7 +305,7 @@ impl PaycheckTemplate {
         context.insert("date", &dates.date.format("%Y/%m/%d").to_string());
 
         let text = tera.render(&self.name, &context)?;
-        let _file = LedgerFile::parse_text(text, self.name.try_into()?)?;
+        let _file = LedgerFile::parse_text(text, self.name.into())?;
 
         let allocated = self.paycheck.lock().unwrap().take().unwrap();
 

@@ -81,7 +81,6 @@ impl Spending {
                 let full_payments = (&total / &maximum).to_usize().unwrap();
                 let last = total % maximum.clone();
                 (0..full_payments)
-                    .into_iter()
                     .map(|_| maximum.clone())
                     .chain(std::iter::once(last))
                     .collect_vec()
@@ -166,7 +165,7 @@ impl Covered {
             self.emergency.as_ref(),
         ]
         .into_iter()
-        .flat_map(|e| e)
+        .flatten()
     }
 
     fn to_corrective_operations(self) -> impl Iterator<Item = Operation> {
@@ -259,7 +258,7 @@ impl Available {
                 } else if self.early.is_positive() {
                     let taking = std::cmp::min(remaining.clone(), self.early.clone());
                     (
-                        Some(spending.early(today.clone(), taking.clone(), &self.names)),
+                        Some(spending.early(*today, taking.clone(), &self.names)),
                         remaining - taking,
                     )
                 } else {
@@ -272,7 +271,7 @@ impl Available {
         let (available, remaining) = if remaining.is_positive() && self.available.is_positive() {
             let taking = std::cmp::min(remaining.clone(), self.available.clone());
             (
-                Some(spending.available(today.clone(), taking.clone(), &self.names)),
+                Some(spending.available(*today, taking.clone(), &self.names)),
                 remaining - taking,
             )
         } else {
@@ -283,7 +282,7 @@ impl Available {
             if remaining.is_positive() && self.emergency.is_positive() && emergency {
                 let taking = std::cmp::min(remaining.clone(), self.emergency.clone());
                 (
-                    Some(spending.emergency(today.clone(), taking.clone(), &self.names)),
+                    Some(spending.emergency(*today, taking.clone(), &self.names)),
                     remaining - taking,
                 )
             } else {
@@ -310,7 +309,7 @@ struct SharedAvailable {
 impl SharedAvailable {
     fn update(&self, tx: &Transaction) {
         let mut available = self.available.borrow_mut();
-        available.update(&tx);
+        available.update(tx);
     }
 
     fn cover(&self, spending: &Spending, today: &NaiveDate) -> Option<Covered> {
@@ -377,7 +376,7 @@ impl Finances {
             .into_iter()
             .flatten();
 
-        self.today = Some(tx.date().clone());
+        self.today = Some(*tx.date());
         self.available.update(tx);
 
         for op in ops {
@@ -534,7 +533,7 @@ impl Operator for AllocatePaycheck {
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>> {
         debug!("{:?} {}", tx.date, tx.payee);
 
-        let template = pay::PaycheckTemplate::new(self.income.name(), tx.date().clone());
+        let template = pay::PaycheckTemplate::new(self.income.name(), *tx.date());
         let paycheck = template.generate(tx)?;
         let cycle = self.income.cycle();
         let transactions = paycheck.transactions(cycle, &self.names)?;
@@ -578,8 +577,7 @@ impl Operator for RefundMoney {
             Ok(Vec::default())
         } else {
             Ok(vec![Operation::RefundedToAvailable(
-                Transactions::new(tx.date().clone(), &self.names, tx)
-                    .make_refund(refunded.into_iter())?,
+                Transactions::new(*tx.date(), &self.names, tx).make_refund(refunded.into_iter())?,
             )])
         }
     }
@@ -604,7 +602,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
             .sum();
 
         let envelope: AccountPath = self.config.name.as_str().into();
-        let envelope_withdrawal = Transactions::new(tx.date().clone(), &self.names, tx)
+        let envelope_withdrawal = Transactions::new(*tx.date(), &self.names, tx)
             .make_envelope_withdrawal(vec![(envelope.clone(), total.clone())].into_iter())?;
 
         if total.is_positive() {
@@ -620,7 +618,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
                 Operation::CoverSpending(spending),
             ])
         } else {
-            let refund = Transactions::new(tx.date().clone(), &self.names, tx)
+            let refund = Transactions::new(*tx.date(), &self.names, tx)
                 .make_refund(vec![(envelope.clone(), -total)].into_iter())?;
 
             Ok(vec![

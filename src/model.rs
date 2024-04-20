@@ -334,7 +334,7 @@ impl Transaction {
     pub fn date(&self) -> &NaiveDate {
         match &self.date {
             ParsedDate::Full(date) => date,
-            ParsedDate::QualifiedMonthDay(date) => &date,
+            ParsedDate::QualifiedMonthDay(date) => date,
             ParsedDate::MonthDay(_, _) => todo!(),
         }
     }
@@ -904,7 +904,7 @@ pub fn sortable_nodes<'a>(
 ) -> impl Iterator<Item = SortedNode<'a>> {
     i.scan((NaiveDate::MIN, 0), |acc, node| {
         let node_date: Option<NaiveDate> = match node {
-            Node::Transaction(tx) => Some(tx.date().clone()),
+            Node::Transaction(tx) => Some(*tx.date()),
             Node::DatedPrice(p) => Some(p.date),
             _ => None,
         };

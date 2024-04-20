@@ -168,9 +168,9 @@ fn basic_commodity(i: &str) -> IResult<&str, Expression> {
             Expression::Commodity(CommodityExpression {
                 quantity,
                 symbol: symbol.into(),
-                lot_price: maybe_lot_price.as_ref().map(|d| d.clone()),
-                price: maybe_price.as_ref().map(|d| d.clone()),
-                date: maybe_date.map(|d| d),
+                lot_price: maybe_lot_price.clone(),
+                price: maybe_price.clone(),
+                date: maybe_date,
             })
         },
     )(i)
@@ -374,5 +374,5 @@ fn month_day_string(i: &str) -> IResult<&str, ParsedDate> {
 }
 
 fn parsed_date_string(i: &str) -> IResult<&str, ParsedDate> {
-    alt((map(date_string, |v| ParsedDate::Full(v)), month_day_string))(i)
+    alt((map(date_string, ParsedDate::Full), month_day_string))(i)
 }
