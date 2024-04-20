@@ -260,6 +260,6 @@ pub fn meter(value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Valu
             }
             None => Ok(to_value("?")?),
         },
-        None => Err(tera::Error::msg("Missing $ balance")),
+        None => Ok(to_value("")?),
     }
 }
