@@ -288,6 +288,16 @@ impl Transaction {
             refs: self.refs,
         })
     }
+
+    pub fn short_string(&self) -> String {
+        let postings = self
+            .postings
+            .iter()
+            .sorted_by_key(|p| p.has_value())
+            .map(|p| p.account.as_str())
+            .join(", ");
+        format!("Tx('{}' <{}>)", &self.payee, postings)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

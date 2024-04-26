@@ -37,6 +37,10 @@ impl std::fmt::Display for Spending {
 }
 
 impl Spending {
+    fn short_string(&self) -> String {
+        self.original.short_string()
+    }
+
     fn affects_emergency(&self, names: &Names) -> bool {
         self.original.has_posting_for(&names.emergency)
     }
@@ -248,7 +252,7 @@ impl Available {
     }
 
     fn cover(&self, spending: &Spending, today: &NaiveDate) -> Option<Covered> {
-        let emergency = !spending.affects_emergency(&self.names);
+        let affects_emergency = spending.affects_emergency(&self.names);
         let remaining = spending.total.clone();
 
         let (early, remaining) = match spending.scheduled.as_ref() {
@@ -383,6 +387,7 @@ impl Finances {
             if self.can_apply(&op) {
                 self.apply(op)?;
             } else {
+                trace!("queue {:?}", op);
                 self.pending.push(op);
             }
         }
@@ -451,7 +456,12 @@ impl Finances {
                     }
 
                     let ops = covered.clone().to_corrective_operations();
-                    self.pending.extend(ops);
+                    for op in ops {
+                        trace!("queue {:?}", op);
+                        self.pending.push(op);
+                    }
+                } else {
+                    panic!("not covered");
                 }
             }
             Operation::RefundedToAvailable(tx) | Operation::EnvelopeWithdrawal(tx) => {
