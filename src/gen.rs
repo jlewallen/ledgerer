@@ -317,7 +317,7 @@ impl SharedAvailable {
     }
 
     fn cover(&self, spending: &Spending, today: &NaiveDate) -> Option<Covered> {
-        let available = self.available.borrow_mut();
+        let available = self.available.borrow();
         available.cover(spending, today)
     }
 }
