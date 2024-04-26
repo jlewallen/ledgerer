@@ -407,6 +407,27 @@ impl Finances {
         }
     }
 
+    fn drain(&mut self) -> Result<()> {
+        let mut pending = self.pending.drain(0..).collect_vec();
+        let unprocessed = pending
+            .drain(0..)
+            .flat_map(|op| {
+                if self.can_apply(&op) {
+                    self.apply(op).unwrap();
+
+                    None
+                } else {
+                    trace!("queue {:?}", op);
+                    Some(op)
+                }
+            })
+            .collect_vec();
+
+        self.pending = unprocessed;
+
+        Ok(())
+    }
+
     fn apply(&mut self, op: Operation) -> Result<()> {
         debug!("{}", &op);
 
@@ -430,21 +451,7 @@ impl Finances {
                         .collect_vec();
                 }
 
-                let mut pending = self.pending.drain(0..).collect_vec();
-                let unprocessed = pending
-                    .drain(0..)
-                    .flat_map(|op| {
-                        if self.can_apply(&op) {
-                            self.apply(op).unwrap();
-
-                            None
-                        } else {
-                            Some(op)
-                        }
-                    })
-                    .collect_vec();
-
-                self.pending = unprocessed;
+                self.drain()?;
             }
             Operation::CoverSpending(spending) | Operation::CoverEmergency(spending) => {
                 let today = self.today.as_ref().unwrap();
