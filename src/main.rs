@@ -46,7 +46,11 @@ fn main() -> Result<()> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(get_rust_log()))
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .without_time()
+                .with_writer(std::io::stderr),
+        )
         .init();
 
     let cli = Cli::parse();
