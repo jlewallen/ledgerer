@@ -282,25 +282,32 @@ impl Available {
             (None, remaining)
         };
 
-        let (emergency, remaining) =
-            if remaining.is_positive() && self.emergency.is_positive() && emergency {
-                let taking = std::cmp::min(remaining.clone(), self.emergency.clone());
-                (
-                    Some(spending.emergency(*today, taking.clone(), &self.names)),
-                    remaining - taking,
-                )
-            } else {
-                (None, remaining)
-            };
-
-        if !remaining.is_zero() {
-            None
+        let (emergency, remaining) = if remaining.is_positive() && !affects_emergency {
+            let taking = std::cmp::min(remaining.clone(), self.emergency.clone());
+            (
+                Some(spending.emergency(*today, taking.clone(), &self.names)),
+                remaining - taking,
+            )
         } else {
+            (None, remaining)
+        };
+
+        if remaining.is_zero() {
             Some(Covered {
                 available,
                 emergency,
                 early,
             })
+        } else {
+            debug!(
+                "uncovered available={:?}  emergency={:?} remaining={:?} {}",
+                self,
+                affects_emergency,
+                remaining.to_f32(),
+                spending.short_string()
+            );
+
+            None
         }
     }
 }
