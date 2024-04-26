@@ -778,7 +778,7 @@ impl LedgerFile {
 
     pub fn iter_transactions_in_order(&self) -> impl Iterator<Item = &Transaction> {
         let mut txs: Vec<&Transaction> = self.iter_transactions().collect();
-        txs.sort_unstable_by_key(|i| (i.date(), i.order, i.specific_order(), &i.origin, &i.payee));
+        txs.sort_by_key(|i| (i.date(), i.order, i.specific_order(), &i.origin, &i.payee));
         txs.into_iter()
     }
 
