@@ -135,6 +135,10 @@ pub struct EnvelopeDefinition {
     expense: regex::Regex,
     pub name: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub simple: bool,
+    #[serde(default)]
+    pub debug: bool,
 }
 
 impl EnvelopeDefinition {

@@ -637,13 +637,19 @@ impl Operator for FillEnvelopeAndCoverSpending {
                 scheduled: None,
             };
 
-            Ok(vec![
-                Operation::EnvelopeWithdrawal(envelope_withdrawal),
-                Operation::CoverSpending(spending),
-            ])
+            if self.config.simple {
+                Ok(vec![Operation::EnvelopeWithdrawal(envelope_withdrawal)])
+            } else {
+                Ok(vec![
+                    Operation::EnvelopeWithdrawal(envelope_withdrawal),
+                    Operation::CoverSpending(spending),
+                ])
+            }
         } else {
             let refund = Transactions::new(*tx.date(), &self.names, tx)
                 .make_refund(vec![(envelope.clone(), -total)].into_iter())?;
+
+            assert!(!self.config.simple);
 
             Ok(vec![
                 Operation::EnvelopeWithdrawal(envelope_withdrawal),
