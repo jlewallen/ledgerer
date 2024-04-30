@@ -327,7 +327,7 @@ impl Serialize for Transaction {
         S: serde::Serializer,
     {
         let mut state = serializer.serialize_struct("Transaction", 6)?;
-        state.serialize_field("date", &format!("{:?}T00:00:00", &self.date))?; // TODO
+        state.serialize_field("date", &format!("{:?}T00:00:00", self.date()))?;
         state.serialize_field("payee", &self.payee)?;
         state.serialize_field("cleared", &self.cleared)?;
         state.serialize_field("mid", &self.mid)?;
