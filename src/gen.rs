@@ -45,21 +45,39 @@ impl Spending {
         self.original.has_posting_for(&names.emergency)
     }
 
-    fn available(&self, date: NaiveDate, total: BigDecimal, names: &Names) -> Transaction {
+    fn available(
+        &self,
+        date: NaiveDate,
+        total: BigDecimal,
+        refs: Vec<String>,
+        names: &Names,
+    ) -> Transaction {
         Transactions::new(date, names, &self.original)
-            .make_cover_from_available([(self.envelope.clone(), total)].into_iter())
+            .make_cover_from_available([(self.envelope.clone(), total)].into_iter(), refs)
             .unwrap()
     }
 
-    fn emergency(&self, date: NaiveDate, total: BigDecimal, names: &Names) -> Transaction {
+    fn emergency(
+        &self,
+        date: NaiveDate,
+        total: BigDecimal,
+        refs: Vec<String>,
+        names: &Names,
+    ) -> Transaction {
         Transactions::new(date, names, &self.original)
-            .make_cover_from_emergency([(self.envelope.clone(), total)].into_iter())
+            .make_cover_from_emergency([(self.envelope.clone(), total)].into_iter(), refs)
             .unwrap()
     }
 
-    fn early(&self, date: NaiveDate, total: BigDecimal, names: &Names) -> Transaction {
+    fn early(
+        &self,
+        date: NaiveDate,
+        total: BigDecimal,
+        refs: Vec<String>,
+        names: &Names,
+    ) -> Transaction {
         Transactions::new(date, names, &self.original)
-            .make_cover_from_early([(self.envelope.clone(), total)].into_iter())
+            .make_cover_from_early([(self.envelope.clone(), total)].into_iter(), refs)
             .unwrap()
     }
 
@@ -162,6 +180,18 @@ struct Covered {
 }
 
 impl Covered {
+    #[allow(dead_code)]
+    fn references(&self) -> Vec<String> {
+        vec![
+            self.early.as_ref().and_then(|v| v.mid.to_owned()),
+            self.available.as_ref().and_then(|v| v.mid.to_owned()),
+            self.emergency.as_ref().and_then(|v| v.mid.to_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
     fn transactions(&self) -> impl Iterator<Item = &Transaction> {
         vec![
             self.early.as_ref(),
@@ -198,11 +228,93 @@ impl Covered {
     }
 }
 
+pub struct NamedDecimal {
+    name: String,
+    value: BigDecimal,
+}
+
+impl std::fmt::Debug for NamedDecimal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}: ${}", &self.name, &self.value))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NamedMoney {
+    money: Vec<NamedDecimal>,
+}
+
+impl NamedMoney {
+    fn total(&self) -> BigDecimal {
+        self.money.iter().map(|v| v.value.clone()).sum()
+    }
+
+    fn update(&mut self, name: Option<&String>, mut value: BigDecimal) -> Vec<String> {
+        if value.is_positive() {
+            self.money.push(NamedDecimal {
+                name: name
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| "TODO")
+                    .to_owned(),
+                value,
+            });
+
+            Vec::default()
+        } else {
+            let mut refs = Vec::new();
+
+            while value.is_negative() {
+                // println!("{} {:?}", value, self.money);
+
+                if let Some(named) = self.money.first_mut() {
+                    let deducting = std::cmp::min(value.clone().abs(), named.value.clone());
+
+                    named.value -= deducting.clone();
+                    value += deducting;
+
+                    refs.push(named.name.clone());
+
+                    if !named.value.is_positive() {
+                        // println!("Empty {:?}", named);
+                        self.money.remove(0);
+                    }
+                } else {
+                    panic!("No named money left {}", value);
+                }
+            }
+
+            // println!("{:?}", refs);
+
+            refs
+        }
+    }
+
+    fn cover(&self, value: BigDecimal) -> Option<(BigDecimal, Vec<String>)> {
+        if self.money.is_empty() || value.is_zero() {
+            None
+        } else {
+            let mut refs = Vec::new();
+            let mut taken = BigDecimal::zero();
+            for named in self.money.iter() {
+                let remaining = value.clone() - taken.clone();
+                if remaining.is_zero() {
+                    break;
+                }
+                let deducting = std::cmp::min(remaining, named.value.clone());
+                taken += deducting;
+                refs.push(named.name.clone());
+            }
+            // println!("{:?} {:?}", taken, refs);
+            Some((taken, refs))
+        }
+    }
+}
+
 struct Available {
     names: Names,
-    available: BigDecimal,
-    emergency: BigDecimal,
-    early: BigDecimal,
+    available: NamedMoney,
+    emergency: NamedMoney,
+    early: NamedMoney,
 }
 
 impl std::fmt::Debug for Available {
@@ -210,7 +322,9 @@ impl std::fmt::Debug for Available {
         write!(
             f,
             "Avail={} Emerg={} Early={}",
-            &self.available, &self.emergency, &self.early
+            &self.available.total(),
+            &self.emergency.total(),
+            &self.early.total()
         )
     }
 }
@@ -219,9 +333,9 @@ impl Available {
     fn new(names: Names) -> Self {
         Self {
             names,
-            available: BigDecimal::default(),
-            emergency: BigDecimal::default(),
-            early: BigDecimal::default(),
+            available: Default::default(),
+            emergency: Default::default(),
+            early: Default::default(),
         }
     }
 
@@ -230,24 +344,27 @@ impl Available {
             .iter_postings_for(&self.names.available)
             .filter_map(|p| p.has_value())
         {
-            self.available += value;
-            assert!(self.available >= BigDecimal::zero(), "{:?}", tx);
+            self.available.update(tx.mid.as_ref(), value.clone());
+
+            assert!(!self.available.total().is_negative(), "{:?}", tx);
         }
 
         for value in tx
             .iter_postings_for(&self.names.early)
             .filter_map(|p| p.has_value())
         {
-            self.early += value;
-            assert!(self.early >= BigDecimal::zero(), "{:?}", tx);
+            self.early.update(tx.mid.as_ref(), value.clone());
+
+            assert!(!self.early.total().is_negative(), "{:?}", tx);
         }
 
         for value in tx
             .iter_postings_for(&self.names.emergency)
             .filter_map(|p| p.has_value())
         {
-            self.emergency += value;
-            assert!(self.emergency >= BigDecimal::zero(), "{:?}", tx);
+            self.emergency.update(tx.mid.as_ref(), value.clone());
+
+            assert!(!self.emergency.total().is_negative(), "{:?}", tx);
         }
     }
 
@@ -259,11 +376,10 @@ impl Available {
             Some(date) => {
                 if today >= date {
                     (None, remaining)
-                } else if self.early.is_positive() {
-                    let taking = std::cmp::min(remaining.clone(), self.early.clone());
+                } else if let Some(taking) = self.early.cover(remaining.clone()) {
                     (
-                        Some(spending.early(*today, taking.clone(), &self.names)),
-                        remaining - taking,
+                        Some(spending.early(*today, taking.0.clone(), taking.1, &self.names)),
+                        remaining - taking.0,
                     )
                 } else {
                     return None;
@@ -272,21 +388,22 @@ impl Available {
             None => (None, remaining),
         };
 
-        let (available, remaining) = if remaining.is_positive() && self.available.is_positive() {
-            let taking = std::cmp::min(remaining.clone(), self.available.clone());
+        let (available, remaining) = if let Some(taking) = self.available.cover(remaining.clone()) {
             (
-                Some(spending.available(*today, taking.clone(), &self.names)),
-                remaining - taking,
+                Some(spending.available(*today, taking.0.clone(), taking.1, &self.names)),
+                remaining - taking.0,
             )
         } else {
             (None, remaining)
         };
 
         let (emergency, remaining) = if remaining.is_positive() && !affects_emergency {
-            let taking = std::cmp::min(remaining.clone(), self.emergency.clone());
+            let Some(taking) = self.emergency.cover(remaining.clone()) else {
+                panic!("No emergency left");
+            };
             (
-                Some(spending.emergency(*today, taking.clone(), &self.names)),
-                remaining - taking,
+                Some(spending.emergency(*today, taking.0.clone(), taking.1, &self.names)),
+                remaining - taking.0,
             )
         } else {
             (None, remaining)
@@ -818,13 +935,23 @@ impl<'t> Transactions<'t> {
         description: &str,
         balanced_by: impl Into<AccountPath>,
         postings: impl Iterator<Item = (AccountPath, BigDecimal)>,
+        refs: Vec<String>,
     ) -> Result<Transaction> {
+        let payee_refs = refs
+            .clone()
+            .into_iter()
+            .chain(self.tx.mid.clone())
+            .join(",");
+
+        let payee_refs = if !payee_refs.is_empty() {
+            format!("#{}#", payee_refs)
+        } else {
+            payee_refs
+        };
+
         Transaction {
             date: crate::model::ParsedDate::Full(self.date),
-            payee: match self.tx.mid.as_ref() {
-                Some(mid) => format!("{} `{}` #{}#", description, self.tx.payee, mid),
-                None => format!("{} `{}`", description, self.tx.payee),
-            },
+            payee: format!("{} `{}` {}", description, self.tx.payee, payee_refs),
             cleared: self.tx.cleared,
             postings: postings
                 .into_iter()
@@ -843,7 +970,7 @@ impl<'t> Transactions<'t> {
             mid: None,
             order: None,
             origin: Some(Origin::Generated),
-            refs: Vec::default(),
+            refs,
         }
         .into_balanced()
     }
@@ -856,6 +983,7 @@ impl<'t> Transactions<'t> {
             "refund",
             self.names.available.as_str(),
             refunded.into_iter().map(|(a, v)| (a, -v)),
+            Vec::default(),
         )
     }
 
@@ -872,28 +1000,32 @@ impl<'t> Transactions<'t> {
             "from envelope",
             source.as_str(),
             reserving.into_iter().map(|(a, v)| (a, -v)),
+            Vec::default(),
         )
     }
 
     fn make_cover_from_available(
         &self,
         spending: impl Iterator<Item = (AccountPath, BigDecimal)>,
+        refs: Vec<String>,
     ) -> Result<Transaction> {
-        self.make("cover", self.names.available.as_str(), spending)
+        self.make("cover", self.names.available.as_str(), spending, refs)
     }
 
     fn make_cover_from_emergency(
         &self,
         spending: impl Iterator<Item = (AccountPath, BigDecimal)>,
+        refs: Vec<String>,
     ) -> Result<Transaction> {
-        self.make("emergency", self.names.emergency.as_str(), spending)
+        self.make("emergency", self.names.emergency.as_str(), spending, refs)
     }
 
     fn make_cover_from_early(
         &self,
         spending: impl Iterator<Item = (AccountPath, BigDecimal)>,
+        refs: Vec<String>,
     ) -> Result<Transaction> {
-        self.make("early", self.names.early.as_str(), spending)
+        self.make("early", self.names.early.as_str(), spending, refs)
     }
 }
 
