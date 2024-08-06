@@ -138,6 +138,7 @@ pub struct EnvelopeDefinition {
     #[serde(default)]
     pub simple: bool,
     #[serde(default)]
+    #[allow(dead_code)]
     pub debug: bool,
 }
 
