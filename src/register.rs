@@ -126,7 +126,7 @@ impl Format {
         };
         let after_values =
             maximum_width - value_width - cumulative_width.unwrap_or_default() - fixed_spaces;
-        let name_width = after_values / 2;
+        let name_width = after_values / 2 - 1;
         let leading_width = after_values / 2;
 
         Self {
