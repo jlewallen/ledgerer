@@ -647,19 +647,6 @@ trait Operator: std::fmt::Debug {
     fn apply(&self, tx: &Transaction) -> Result<Vec<Operation>>;
 }
 
-#[derive(Debug, Default)]
-struct Noop {}
-
-impl Operator for Noop {
-    fn matches(&self, _tx: &Transaction) -> bool {
-        false
-    }
-
-    fn apply(&self, _tx: &Transaction) -> Result<Vec<Operation>> {
-        Ok(Vec::default())
-    }
-}
-
 #[derive(Debug)]
 struct AllocatePaycheck {
     names: Names,
