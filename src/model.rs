@@ -1026,6 +1026,16 @@ impl Balance {
         }
     }
 
+    pub fn as_currency(&self) -> Option<BigDecimal> {
+        match self {
+            Balance::Currency {
+                symbol: _symbol,
+                value,
+            } => Some(value.clone()),
+            _ => None,
+        }
+    }
+
     pub fn commodity(symbol: &str, quantity: BigDecimal, price: Option<BigDecimal>) -> Self {
         Self::Commodity {
             symbol: symbol.to_owned(),

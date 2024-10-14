@@ -4,6 +4,7 @@ use anyhow::Result;
 use bigdecimal::{BigDecimal, Signed, ToPrimitive, Zero};
 use chrono::{Months, NaiveDate};
 use clap::Args;
+use config::CheckDefinition;
 use itertools::Itertools;
 use regex::Regex;
 use thiserror::Error;
@@ -612,6 +613,49 @@ pub struct Command {
     generated: PathBuf,
 }
 
+struct Transactions<'t> {
+    txs: Vec<&'t Transaction>,
+}
+
+impl<'t> Transactions<'t> {
+    pub fn new(txs: Vec<&'t Transaction>) -> Self {
+        Self { txs }
+    }
+
+    pub fn balance(&self, path: &str) -> Option<BigDecimal> {
+        Some(
+            self.txs
+                .iter()
+                .flat_map(|t| t.iter_postings_for(path))
+                .flat_map(|p| p.into_balance())
+                .flat_map(|p| p.as_currency())
+                .sum::<BigDecimal>(),
+        )
+    }
+}
+
+fn apply_checks(txs: Transactions, cfg: &Configuration) -> anyhow::Result<()> {
+    for check in cfg.checks.iter() {
+        match check {
+            CheckDefinition::Balanced(l, r) => match (txs.balance(l), txs.balance(r)) {
+                (Some(l_bal), Some(r_bal)) => {
+                    let total = l_bal + r_bal;
+                    if total.is_zero() {
+                        trace!("check: {} == {}", l, r);
+                    } else {
+                        error!("check: {} != {}", l, r);
+                    }
+                }
+                (None, Some(r_bal)) => error!("check: {} = {}, {} is empty", r, r_bal, l),
+                (Some(l_bal), None) => error!("check: {} = {}, {} is empty", l, l_bal, r),
+                (None, None) => warn!("check: {} is empty, {} is empty", l, r),
+            },
+        }
+    }
+
+    Ok(())
+}
+
 pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
     let configuration = config::Configuration::load(&cmd.config)?;
 
@@ -625,8 +669,12 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
         finances.handle(tx)?;
     }
 
-    let nodes = finances
-        .generated
+    let generated = finances.generated.into_iter().collect_vec();
+
+    let txs = sorted.into_iter().chain(generated.iter()).collect_vec();
+    apply_checks(Transactions::new(txs), &configuration)?;
+
+    let nodes = generated
         .into_iter()
         .enumerate()
         .flat_map(|(i, mut tx)| {

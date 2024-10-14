@@ -15,6 +15,7 @@ pub struct Configuration {
     pub spending: Vec<SpendingDefinition>,
     pub emergency: Vec<EmergencyDefinition>,
     pub refund: Vec<RefundDefinition>,
+    pub checks: Vec<CheckDefinition>,
 }
 
 impl Configuration {
@@ -22,6 +23,12 @@ impl Configuration {
         let file = File::open(path)?;
         Ok(serde_json::from_reader(file)?)
     }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckDefinition {
+    Balanced(String, String),
 }
 
 #[derive(Debug, Deserialize, Clone)]
