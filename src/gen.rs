@@ -52,7 +52,7 @@ impl Spending {
         refs: Vec<String>,
         names: &Names,
     ) -> Transaction {
-        Transactions::new(date, names, &self.original)
+        TxFactory::new(date, names, &self.original)
             .make_cover_from_available([(self.envelope.clone(), total)].into_iter(), refs)
             .unwrap()
     }
@@ -64,7 +64,7 @@ impl Spending {
         refs: Vec<String>,
         names: &Names,
     ) -> Transaction {
-        Transactions::new(date, names, &self.original)
+        TxFactory::new(date, names, &self.original)
             .make_cover_from_emergency([(self.envelope.clone(), total)].into_iter(), refs)
             .unwrap()
     }
@@ -76,7 +76,7 @@ impl Spending {
         refs: Vec<String>,
         names: &Names,
     ) -> Transaction {
-        Transactions::new(date, names, &self.original)
+        TxFactory::new(date, names, &self.original)
             .make_cover_from_early([(self.envelope.clone(), total)].into_iter(), refs)
             .unwrap()
     }
@@ -705,7 +705,7 @@ impl Operator for RefundMoney {
             Ok(Vec::default())
         } else {
             Ok(vec![Operation::RefundedToAvailable(
-                Transactions::new(*tx.date(), &self.names, tx).make_refund(refunded.into_iter())?,
+                TxFactory::new(*tx.date(), &self.names, tx).make_refund(refunded.into_iter())?,
             )])
         }
     }
@@ -730,7 +730,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
             .sum();
 
         let envelope: AccountPath = self.config.name.as_str().into();
-        let envelope_withdrawal = Transactions::new(*tx.date(), &self.names, tx)
+        let envelope_withdrawal = TxFactory::new(*tx.date(), &self.names, tx)
             .make_envelope_withdrawal(vec![(envelope.clone(), total.clone())].into_iter())?;
 
         if total.is_positive() {
@@ -750,7 +750,7 @@ impl Operator for FillEnvelopeAndCoverSpending {
                 ])
             }
         } else {
-            let refund = Transactions::new(*tx.date(), &self.names, tx)
+            let refund = TxFactory::new(*tx.date(), &self.names, tx)
                 .make_refund(vec![(envelope.clone(), -total)].into_iter())?;
 
             assert!(!self.config.simple);
@@ -906,13 +906,13 @@ impl Matchers {
     }
 }
 
-struct Transactions<'t> {
+struct TxFactory<'t> {
     date: NaiveDate,
     names: &'t Names,
     tx: &'t Transaction,
 }
 
-impl<'t> Transactions<'t> {
+impl<'t> TxFactory<'t> {
     fn new(date: NaiveDate, names: &'t Names, tx: &'t Transaction) -> Self {
         Self { date, names, tx }
     }
