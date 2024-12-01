@@ -388,7 +388,10 @@ impl Transaction {
             .any(|p| re.is_match(p.account.as_str()))
     }
 
-    pub fn iter_postings_for<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &Posting> + 'a {
+    pub fn iter_postings_for<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> impl Iterator<Item = &'a Posting> + 'a {
         self.postings
             .iter()
             .filter(move |p| p.account.as_str() == name)
@@ -397,7 +400,7 @@ impl Transaction {
     pub fn iter_postings_for_re<'a, 'b: 'a>(
         &'a self,
         re: &'b regex::Regex,
-    ) -> impl Iterator<Item = &Posting> + 'a {
+    ) -> impl Iterator<Item = &'a Posting> + 'a {
         self.postings
             .iter()
             .filter(move |p| re.is_match(p.account.as_str()))
