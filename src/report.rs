@@ -38,6 +38,7 @@ pub fn execute_command(file: &LedgerFile, cmd: &Command) -> anyhow::Result<()> {
                 pattern: None,
                 future: false,
                 cleared,
+                uncleared: false,
                 actual: cmd.actual,
                 after: None,
                 real: false,

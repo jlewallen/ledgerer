@@ -13,6 +13,8 @@ pub struct Command {
     #[arg(long)]
     pub cleared: bool,
     #[arg(short, long)]
+    pub uncleared: bool,
+    #[arg(short, long)]
     pub before: Option<String>,
     #[arg(short, long)]
     pub after: Option<String>,
@@ -45,6 +47,7 @@ impl Command {
             .map_or(Ok(None), |v| v.map(Some))?;
         Ok(Filter {
             cleared: self.cleared,
+            uncleared: self.uncleared,
             before,
             after,
             pattern,
@@ -56,6 +59,7 @@ impl Command {
 
 pub(crate) struct Filter {
     pub(crate) cleared: bool,
+    pub(crate) uncleared: bool,
     pub(crate) before: Option<DateTime<Utc>>,
     pub(crate) after: Option<DateTime<Utc>>,
     pub(crate) pattern: Option<Regex>,
@@ -81,7 +85,11 @@ impl Filter {
             None => true,
         };
 
-        let allow_cleared = !self.cleared || tx.cleared;
+        let allow_cleared = if self.uncleared {
+            !tx.cleared
+        } else {
+            !self.cleared || tx.cleared
+        };
 
         allow_cleared && allow_before && allow_after
     }

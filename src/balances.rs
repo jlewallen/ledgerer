@@ -12,6 +12,8 @@ pub struct Command {
     #[arg(short, long)]
     pub cleared: bool,
     #[arg(short, long)]
+    pub uncleared: bool,
+    #[arg(short, long)]
     pub before: Option<String>,
     #[arg(short, long)]
     pub after: Option<String>,
@@ -50,6 +52,7 @@ impl Command {
             .map_or(Ok(None), |v| v.map(Some))?;
         Ok(Filter {
             cleared: self.cleared,
+            uncleared: self.uncleared,
             before,
             after,
             pattern,
