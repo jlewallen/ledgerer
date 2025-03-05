@@ -58,6 +58,8 @@ impl Command {
             pattern,
             real: self.real,
             virt: self.virt,
+            positive: false,
+            negative: false,
         })
     }
 }

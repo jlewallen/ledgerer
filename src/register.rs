@@ -28,6 +28,10 @@ pub struct Command {
     pub width: Option<u16>,
     #[arg(short, long)]
     pub cumulative: bool,
+    #[arg(long)]
+    pub positive: bool,
+    #[arg(long)]
+    pub negative: bool,
 }
 
 impl Command {
@@ -53,6 +57,8 @@ impl Command {
             pattern,
             real: self.real,
             virt: self.virt,
+            positive: self.positive,
+            negative: self.negative,
         })
     }
 }
@@ -65,6 +71,8 @@ pub(crate) struct Filter {
     pub(crate) pattern: Option<Regex>,
     pub(crate) real: bool,
     pub(crate) virt: bool,
+    pub(crate) positive: bool,
+    pub(crate) negative: bool,
 }
 
 impl Filter {
@@ -85,13 +93,38 @@ impl Filter {
             None => true,
         };
 
+        let allow_sign = match (self.positive, self.negative) {
+            (true, false) => {
+                self.postings(tx)
+                    .flat_map(|p| p.has_value())
+                    .sum::<BigDecimal>()
+                    > BigDecimal::zero()
+            }
+            (false, true) => {
+                self.postings(tx)
+                    .flat_map(|p| p.has_value())
+                    .sum::<BigDecimal>()
+                    < BigDecimal::zero()
+            }
+            (false, false) => true,
+            (true, true) => true,
+        };
+
         let allow_cleared = if self.uncleared {
             !tx.cleared
         } else {
             !self.cleared || tx.cleared
         };
 
-        allow_cleared && allow_before && allow_after
+        allow_cleared && allow_before && allow_after && allow_sign
+    }
+
+    fn postings<'t>(&self, tx: &'t Transaction) -> impl Iterator<Item = &'t Posting> + use<'t, '_> {
+        tx.postings.iter().filter(|p| {
+            self.pattern
+                .as_ref()
+                .map_or(true, |c| c.is_match(p.account.as_str()))
+        })
     }
 
     pub(crate) fn matches_posting(&self, posting: &Posting) -> bool {
