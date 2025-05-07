@@ -919,6 +919,7 @@ pub fn sortable_nodes<'a>(
         let node_date: Option<NaiveDate> = match node {
             Node::Transaction(tx) => Some(*tx.date()),
             Node::DatedPrice(p) => Some(p.date),
+            Node::Year(year) => NaiveDate::from_ymd_opt(*year, 1, 1),
             _ => None,
         };
 
