@@ -400,7 +400,7 @@ impl Available {
 
         let (emergency, remaining) = if remaining.is_positive() && !affects_emergency {
             let Some(taking) = self.emergency.cover(remaining.clone()) else {
-                panic!("No emergency left");
+                panic!("No emergency left {:?} {:?}", today, spending);
             };
             (
                 Some(spending.emergency(*today, taking.0.clone(), taking.1, &self.names)),
